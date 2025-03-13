@@ -20,9 +20,7 @@ pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, fra
     }
 
     for point in points {
-        let point_coordinate = [point.x, point.y, point.z];
-        let point_reflectivity = point.reflectivity;
-        octree.insert(point_coordinate, max_depth, point_reflectivity).unwrap();
+        octree.insert(point, max_depth).unwrap();
     }
 
     octree

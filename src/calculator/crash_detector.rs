@@ -34,7 +34,7 @@ pub fn crash_warn_for_octree(
     warn_trigger_distance: f32,
 ) -> (bool, Vec<(f32, [f32; 3])>) {
     // TODO: change input to map
-    let octree_map = octree_input.octree_to_map();
+    let octree_map = octree_input.get_laser_points();
     let mut result = false;
     let mut obstacle_list: Vec<(f32, [f32; 3])> = Vec::new();
 

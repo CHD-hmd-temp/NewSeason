@@ -151,7 +151,7 @@ fn setup_bevy(
     let frame_integration_time = octree_config.frame_integration_time;
     let mut octree = creat_octree::creat_octree_from_udp(boundary, max_depth, voxel_size, frame_integration_time);
     octree.optimize();
-    let leaves = octree.octree_to_map();
+    let leaves = octree.get_laser_points();
 
     for (depth, group) in leaves {
         let grouped_pixel_points = point_divider::divide_points(group);
@@ -306,7 +306,7 @@ fn octree_update_system(
 
     octree.optimize();
 
-    let leaves = octree.octree_to_map();
+    let leaves = octree.get_laser_points();
     for (depth, group) in leaves {
         let grouped_pixel_points = point_divider::divide_points(group);
         let cube_mesh = meshes.add(Mesh::from(

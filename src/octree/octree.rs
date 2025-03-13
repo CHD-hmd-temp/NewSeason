@@ -1,18 +1,21 @@
 #![allow(dead_code)]
-
+use nalgebra::{Matrix3, Vector3, Point3};
 use std::collections::HashMap;
-use bevy::ecs::system::Resource;
-
 use crate::data_reader::structor::LaserPoint;
+
+type Point3f = Point3<f32>;
+type Vector3f = Vector3<f32>;
+type Matrix3f = Matrix3<f32>;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Clone)]
 pub enum Occupancy {
     Free,
     Occupied,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OctreeNode {
     Internal {
         bounds: [[f32; 3]; 2],
@@ -26,6 +29,9 @@ pub enum OctreeNode {
         depth: u32,
         occupancy: Occupancy,
         reflectivity: [u32; 2],
+        laser_points: Vec<LaserPoint>,
+        mu: Option<Vector3f>,   // mean
+        sigma: Option<Matrix3f>,    // covariance
     }
 }
 
@@ -154,7 +160,6 @@ impl OctreeNode {
     }
 }
 
-#[derive(Resource)]
 pub struct Octree {
     root: OctreeNode,
 }
@@ -174,6 +179,9 @@ impl Octree {
                 depth: 0,
                 occupancy: Occupancy::Free,
                 reflectivity: [0, 0],
+                laser_points: Vec::new(),
+                mu: None,
+                sigma: None,
             }
         }
     }
@@ -185,29 +193,29 @@ impl Octree {
 
     pub fn insert(
         &mut self,
-        point: [f32; 3],
+        point: LaserPoint,
         max_depth: u32,
-        point_reflectivity: u8
     ) -> Result<(), String> {
         //log::trace!("Inserting point {:?} into octree", point);
-        Self::insert_internal(&mut self.root, point, 0, max_depth, point_reflectivity)
+        Self::insert_internal(&mut self.root, point, 0, max_depth)
     }
 
     fn insert_internal(
         node: &mut OctreeNode,
-        point: [f32; 3],
+        point: LaserPoint,
         current_depth: u32,
         max_depth: u32,
-        point_reflectivity: u8
     ) -> Result<(), String> {
         // point out-of-bounds check
+        let coordinate = [point.x, point.y, point.z];
+        let point_reflectivity = point.reflectivity as u32;
         let bounds = match node {
             OctreeNode::Leaf { bounds, .. } => bounds,
             OctreeNode::Internal { bounds, .. } => bounds,
         };
         let epsilon = 0.00001;
         for i in 0..3 {
-            if point[i] < bounds[0][i] - epsilon || point[i] > bounds[1][i] + epsilon {
+            if coordinate[i] < bounds[0][i] - epsilon || coordinate[i] > bounds[1][i] + epsilon {
                 //return Err("Point out of bounds".to_string());
                 return Ok(());
             }
@@ -215,29 +223,31 @@ impl Octree {
 
         match node {
             OctreeNode::Internal { center, children, .. } => {
-                let index = Self::get_index(center, point);
+                let index = Self::get_index(center, coordinate);
                 let child = &mut children[index];
-                Self::insert_internal(child, point, current_depth + 1, max_depth, point_reflectivity)
+                Self::insert_internal(child, point, current_depth + 1, max_depth)
             }
             #[allow(unused_variables)]
-            OctreeNode::Leaf { depth, occupancy, reflectivity, .. } => {
+            OctreeNode::Leaf { depth, occupancy, reflectivity, laser_points, .. } => {
                 if *occupancy == Occupancy::Occupied {
                     //log::trace!("Point {:?} already occupied at depth {}", point, depth);
                     reflectivity[0] += point_reflectivity as u32;
                     reflectivity[1] += 1;
+                    laser_points.push(point);
                     return Ok(());
                 }
                 else {
                     if current_depth < max_depth {
                         //log::debug!("Splitting leaf node at depth {}", current_depth);
                         Self::split(node, current_depth)?;
-                        Self::insert_internal(node, point, current_depth, max_depth, point_reflectivity)
+                        Self::insert_internal(node, point, current_depth, max_depth)
                     }
                     else {
                         //log::trace!("Marking node occupied at depth {}", current_depth);
                         *occupancy = Occupancy::Occupied;
                         reflectivity[0] += point_reflectivity as u32;
                         reflectivity[1] += 1;
+                        laser_points.push(point);
                         Ok(())
                     }
                 }
@@ -271,8 +281,17 @@ impl Octree {
             OctreeNode::Leaf { bounds, .. } => bounds,
             _ => return Err("Cannot split non-leaf node".to_string()),
         };
+        let laser_points = match node {
+            OctreeNode::Leaf { laser_points, .. } => laser_points.clone(),
+            _ => return Err("Cannot split non-leaf node".to_string()),
+        };
         let children = match node {
-            OctreeNode::Leaf { .. } => Self::create_children(&bounds, &center, current_depth),
+            OctreeNode::Leaf { .. } => Self::create_children(
+                &bounds,
+                &center,
+                current_depth,
+                laser_points
+            ),
             _ => return Err("Cannot split non-leaf node".to_string()),
         };
 
@@ -289,18 +308,25 @@ impl Octree {
     fn create_children(
         parent_bounds: &[[f32; 3]; 2],
         parent_center: &[f32; 3],
-        parent_depth: u32
+        parent_depth: u32,
+        parent_laser_points: Vec<LaserPoint>,
     ) -> [Box<OctreeNode>; 8] {
         let mut children: [Box<OctreeNode>; 8] = [
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0] }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
         ];
+
+        let mut children_laser_points: Vec<Vec<LaserPoint>> = vec![Vec::new(); 8];
+        for point in parent_laser_points {
+            let index = Self::get_index(parent_center, [point.x, point.y, point.z]);
+            children_laser_points[index].push(point);
+        }
         
         for i in 0..8 {
             let child_bounds = Self::calculate_child_bounds(&parent_bounds, &parent_center, i);
@@ -313,7 +339,10 @@ impl Octree {
                 ],
                 depth: parent_depth + 1,
                 reflectivity: [0, 0],
+                laser_points: children_laser_points[i].clone(),
                 occupancy: Occupancy::Free,
+                mu: None,
+                sigma: None,
             });
         }
 
@@ -350,29 +379,29 @@ impl Octree {
         [child_min, child_max]
     }
 
-    pub fn octree_to_map(&self) -> HashMap<u32, Vec<LaserPoint>> {
+    pub fn octree_to_map(&self) -> HashMap<u32, Vec<OctreeNode>> {
         let mut meshes = HashMap::new();
         Self::octree_to_map_internal(&self.root, &mut meshes);
         meshes
     }
 
-    fn octree_to_map_internal(node: &OctreeNode, meshes: &mut HashMap<u32, Vec<LaserPoint>>) {
+    fn octree_to_map_internal(node: &OctreeNode, meshes: &mut HashMap<u32, Vec<OctreeNode>>) {
         match node {
             OctreeNode::Internal { children, .. } => {
                 for child in children.iter() {
                     Self::octree_to_map_internal(child, meshes);
                 }
             }
-            OctreeNode::Leaf { bounds, depth, occupancy, reflectivity, .. } => {
+            OctreeNode::Leaf {  depth, occupancy, .. } => {
                 if *occupancy == Occupancy::Occupied {
-                    let center = [
-                        (bounds[0][0] + bounds[1][0]) / 2.0,
-                        (bounds[0][1] + bounds[1][1]) / 2.0,
-                        (bounds[0][2] + bounds[1][2]) / 2.0,
-                    ];
-                    let reflectivity = Self::node_reflectivity_calculator(reflectivity);
-                    let data = LaserPoint::new(center[0], center[1], center[2], reflectivity);
-                    meshes.entry(*depth).or_insert_with(Vec::new).push(data);
+                    // let center = [
+                    //     (bounds[0][0] + bounds[1][0]) / 2.0,
+                    //     (bounds[0][1] + bounds[1][1]) / 2.0,
+                    //     (bounds[0][2] + bounds[1][2]) / 2.0,
+                    // ];
+                    // let reflectivity = Self::node_reflectivity_calculator(reflectivity);
+                    // let data = LaserPoint::new(center[0], center[1], center[2], reflectivity);
+                    meshes.entry(*depth).or_insert_with(Vec::new).push(node.clone());
                 }
             }
         }
@@ -384,6 +413,28 @@ impl Octree {
         (sum / total).round() as u8
     }
 
+    pub fn get_laser_points(&self) -> HashMap<u32, Vec<LaserPoint>> {
+        let mut points = HashMap::new();
+        Self::get_laser_points_internal(&self.root, &mut points);
+        points
+    }
+
+
+    fn get_laser_points_internal(node: &OctreeNode, points: &mut HashMap<u32, Vec<LaserPoint>>) {
+        match node {
+            OctreeNode::Internal { children, .. } => {
+                for child in children.iter() {
+                    Self::get_laser_points_internal(child, points);
+                }
+            }
+            OctreeNode::Leaf { depth, laser_points, .. } => {
+                if !laser_points.is_empty() {
+                    points.entry(*depth).or_insert_with(Vec::new).extend(laser_points.iter().cloned());
+                }
+            }
+        }
+    }
+
     pub fn refresh(&mut self) {
         let mut new_root = OctreeNode::Leaf {
             bounds: [[-10.0; 3], [10.0; 3]],
@@ -391,6 +442,9 @@ impl Octree {
             depth: 0,
             occupancy: Occupancy::Free,
             reflectivity: [0, 0],
+            laser_points: Vec::new(),
+            mu: None,
+            sigma: None,
         };
         std::mem::swap(&mut self.root, &mut new_root);
         self.root = new_root;
@@ -404,6 +458,7 @@ impl Octree {
 
     pub fn optimize(&mut self) {
         Self::optimize_recursive_internal(&mut self.root);
+        self.compute_statistics();
     }
 
     fn optimize_recursive_internal(node: &mut OctreeNode) {
@@ -416,18 +471,75 @@ impl Octree {
     }
 
     fn try_merge_node(node: &mut OctreeNode) {
+        // if let OctreeNode::Internal { bounds, center, depth, children } = node {
+        //     let all_free = children.iter().all(|c| Self::is_fully_free(c));
+        //     let all_occupied = children.iter().all(|c| Self::is_fully_occupied(c));
+
+        //     if all_free || all_occupied {
+        //         let reflectivity = Self::merge_reflectivity(children);
+        //         let laser_points = Self::merge_laser_points(children);
+        //         *node = OctreeNode::Leaf {
+        //             bounds: *bounds,
+        //             center: *center,
+        //             depth: *depth,
+        //             occupancy: if all_free { Occupancy::Free } else { Occupancy::Occupied },
+        //             reflectivity,
+        //             laser_points,
+        //             mu: None,
+        //             sigma: None,
+        //         };
+        //     }
+        // }
+        // if let OctreeNode::Leaf { laser_points, mu, sigma, .. } = node {
+        //     if !laser_points.is_empty() {
+        //         let n = laser_points.len() as f32;
+        //         let sum = laser_points.iter().fold(Vector3f::zeros(), |acc, p| {
+        //             acc + Vector3f::new(p.x, p.y, p.z)
+        //         });
+        //         let mean = sum / n;
+        //         let sum_sq = laser_points.iter().fold(Matrix3f::zeros(), |acc, p| {
+        //             let diff = Vector3f::new(p.x, p.y, p.z) - mean;
+        //             acc + diff * diff.transpose()
+        //         });
+        //         let cov = sum_sq / n;
+        //         *mu = Some(mean);
+        //         *sigma = Some(cov);
+        //     }
+        // }
         if let OctreeNode::Internal { bounds, center, depth, children } = node {
             let all_free = children.iter().all(|c| Self::is_fully_free(c));
             let all_occupied = children.iter().all(|c| Self::is_fully_occupied(c));
-
+    
             if all_free || all_occupied {
                 let reflectivity = Self::merge_reflectivity(children);
+                let laser_points = Self::merge_laser_points(children);
+                
+                // 直接计算 mu 和 sigma
+                let (mu, sigma) = if laser_points.is_empty() {
+                    (None, None)
+                } else {
+                    let n = laser_points.len() as f32;
+                    let sum = laser_points.iter().fold(Vector3f::zeros(), |acc, p| {
+                        acc + Vector3f::new(p.x, p.y, p.z)
+                    });
+                    let mean = sum / n;
+                    let sum_sq = laser_points.iter().fold(Matrix3f::zeros(), |acc, p| {
+                        let diff = Vector3f::new(p.x, p.y, p.z) - mean;
+                        acc + diff * diff.transpose()
+                    });
+                    let cov = sum_sq / n;
+                    (Some(mean), Some(cov))
+                };
+    
                 *node = OctreeNode::Leaf {
                     bounds: *bounds,
                     center: *center,
                     depth: *depth,
                     occupancy: if all_free { Occupancy::Free } else { Occupancy::Occupied },
                     reflectivity,
+                    laser_points,
+                    mu,
+                    sigma,
                 };
             }
         }
@@ -454,6 +566,22 @@ impl Octree {
         })
     }
 
+    fn merge_laser_points(children: &[Box<OctreeNode>]) -> Vec<LaserPoint> {
+        children.iter().fold(Vec::new(), |mut acc, child| {
+            match child.as_ref() {
+                OctreeNode::Leaf { laser_points, .. } => {
+                    acc.extend(laser_points.iter().cloned());
+                    acc
+                },
+                OctreeNode::Internal { children, .. } => {
+                    let child_laser_points = Self::merge_laser_points(children);
+                    acc.extend(child_laser_points.iter().cloned());
+                    acc
+                }
+            }
+        })
+    }
+
     fn is_fully_occupied(node: &OctreeNode) -> bool {
         match node {
             OctreeNode::Leaf { occupancy, .. } => *occupancy == Occupancy::Occupied,
@@ -465,6 +593,45 @@ impl Octree {
         match node {
             OctreeNode::Leaf { occupancy, .. } => *occupancy == Occupancy::Free,
             OctreeNode::Internal { children, .. } => children.iter().all(|c| Self::is_fully_free(c)),
+        }
+    }
+
+    pub fn compute_statistics(&mut self) {
+        Self::compute_statistics_internal(&mut self.root);
+    }
+
+    fn compute_statistics_internal(node: &mut OctreeNode) {
+        match node {
+            OctreeNode::Leaf { laser_points, mu, sigma, .. } => {
+                if laser_points.is_empty() {
+                    *mu = None;
+                    *sigma = None;
+                    return;
+                }
+                let n = laser_points.len() as f32;
+                let sum = laser_points.iter().fold(Vector3f::zeros(), |acc, p| {
+                    acc + Vector3f::new(p.x, p.y, p.z)
+                });
+                let mean = sum / n;
+                let sum_sq = laser_points.iter().fold(Matrix3f::zeros(), |acc, p| {
+                    let diff = Vector3f::new(p.x, p.y, p.z) - mean;
+                    acc + diff * diff.transpose()
+                });
+                let cov = sum_sq / n;
+                *mu = Some(mean);
+                *sigma = Some(cov);
+            }
+            OctreeNode::Internal { children, .. } => {
+                for i in 0..8 {
+                    Self::compute_statistics_internal(&mut children[i]);
+                }
+            }
+        }
+    }
+
+    pub fn clone(&self) -> Self {
+        Octree {
+            root: self.root.clone(),
         }
     }
 }

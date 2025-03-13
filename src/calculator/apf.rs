@@ -90,7 +90,7 @@ pub fn apf_plan(
     let mut path = vec![start];
     let mut current_pos = start;
     let mut steps = 0;
-    let octree_map = octree.octree_to_map();
+    let octree_map = octree.get_laser_points();
 
     while distance(&current_pos, &goal) > config.epsilon && steps < config.max_steps {
         let f_att = compute_attractive_force(&current_pos, &goal, config.k_att);
