@@ -47,8 +47,8 @@ pub struct OctreeConfig {
 }
 
 pub fn run_bevy() {
-    //let boundary: f32 = io::read_with_default("boundary:", 10.0, None);
-    let boundary: f32 = 10.0;
+    let boundary: f32 = io::read_with_default("boundary:", 10.0, None);
+    //let boundary: f32 = 10.0;
     let max_depth: u32 = io::read_with_default("max_depth:", 7, None);
     let voxel_size: f32 = io::read_with_default("voxel_size:", 0.08, None);
     let frame_integration_time: u32 = io::read_with_default("frame_integration_time:", 100, None);
@@ -306,14 +306,15 @@ fn octree_update_system(
 
     octree.optimize();
 
-    let leaves = octree.get_laser_points();
+    let leaves = octree.octree_to_map();
     for (depth, group) in leaves {
-        let grouped_pixel_points = point_divider::divide_points(group);
+        let cuboid_size = get_size(boundary, depth);
+        let grouped_pixel_points = point_divider::divide_nodes(group);
         let cube_mesh = meshes.add(Mesh::from(
             Cuboid::new(
-                get_size(10.0, depth),
-                get_size(10.0, depth),
-                get_size(10.0, depth)
+                cuboid_size,
+                cuboid_size,
+                cuboid_size
             )
         ));
 

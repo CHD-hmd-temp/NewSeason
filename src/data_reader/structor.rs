@@ -73,3 +73,21 @@ impl Point3 {
         }
     }
 }
+
+pub struct NodeForRender {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub reflectivity: u8,
+}
+
+impl NodeForRender {
+    pub fn new(x: f32, y: f32, z: f32, reflectivity: u8) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            reflectivity,
+        }
+    }
+}

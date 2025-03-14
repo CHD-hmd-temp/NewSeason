@@ -379,6 +379,7 @@ impl Octree {
         [child_min, child_max]
     }
 
+    /// Return a map of depth to a list of leaf nodes at that depth
     pub fn octree_to_map(&self) -> HashMap<u32, Vec<OctreeNode>> {
         let mut meshes = HashMap::new();
         Self::octree_to_map_internal(&self.root, &mut meshes);
@@ -407,11 +408,11 @@ impl Octree {
         }
     }
 
-    fn node_reflectivity_calculator(reflectivity: &[u32; 2]) -> u8 {
-        let total = reflectivity[1] as f32;
-        let sum = reflectivity[0] as f32;
-        (sum / total).round() as u8
-    }
+    // fn node_reflectivity_calculator(reflectivity: &[u32; 2]) -> u8 {
+    //     let total = reflectivity[1] as f32;
+    //     let sum = reflectivity[0] as f32;
+    //     (sum / total).round() as u8
+    // }
 
     pub fn get_laser_points(&self) -> HashMap<u32, Vec<LaserPoint>> {
         let mut points = HashMap::new();
@@ -437,7 +438,7 @@ impl Octree {
 
     pub fn refresh(&mut self) {
         let mut new_root = OctreeNode::Leaf {
-            bounds: [[-10.0; 3], [10.0; 3]],
+            bounds: self.get_root_mut().bounds().clone(),
             center: [0.0; 3],
             depth: 0,
             occupancy: Occupancy::Free,
