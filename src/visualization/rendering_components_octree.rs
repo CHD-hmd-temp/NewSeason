@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_flycam::prelude::*;
 use bevy::color::palettes::css::GOLD;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
-use crate::calculator::point_divider;
+use crate::calculator::{crash_detector, point_divider, coordinate_switch};
 use crate::data_reader::structor::Point3;
 use crate::data_reader::udp_reader::{self, ImuData};
 use crate::visualization::color_calculator;
@@ -105,13 +105,11 @@ pub fn run_bevy() {
             |commands: Commands,
             meshes: ResMut<Assets<Mesh>>,
             materials: ResMut<Assets<StandardMaterial>>,
-            octree_config: Res<OctreeConfig>
             | {
             setup_bevy(
                 commands,
                 meshes,
                 materials,
-                octree_config,
             );
         })
         .add_systems(Update, text_update_system)
@@ -143,45 +141,7 @@ fn setup_bevy(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    octree_config: Res<OctreeConfig>,
 ) {
-    let boundary = octree_config.boundary;
-    let max_depth = octree_config.max_depth;
-    let voxel_size = octree_config.voxel_size;
-    let frame_integration_time = octree_config.frame_integration_time;
-    let mut octree = creat_octree::creat_octree_from_udp(boundary, max_depth, voxel_size, frame_integration_time);
-    octree.optimize();
-    let leaves = octree.get_laser_points();
-
-    for (depth, group) in leaves {
-        let grouped_pixel_points = point_divider::divide_points(group);
-        let cube_mesh = meshes.add(Mesh::from(
-            Cuboid::new(
-                get_size(boundary, depth),
-                get_size(boundary, depth),
-                get_size(boundary, depth)
-            )
-        ));
-
-        for (reflectivity, group) in &grouped_pixel_points {
-            let material = materials.add(StandardMaterial {
-                emissive: color_calculator::reflectivity_to_color(*reflectivity).into(),
-                ..default()
-            });
-
-            for point in group {
-                let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
-                commands.spawn((
-                    //LaserPoint,
-                    Mesh3d(cube_mesh.clone()), // Reuse the same mesh
-                    MeshMaterial3d(material.clone()), // Reuse the same material
-                    Transform::from_translation(Vec3::new(x, y, z)),
-                    OctreeEntity,
-                ));
-            }
-        }
-    };
-
     // Add a camera at [0, 0, 2] and look at front
     commands.spawn((
         Camera3d::default(),
@@ -350,8 +310,6 @@ fn octree_update_system(
         step_size: apf_config.step_size,
     };
 
-    let _warn_trigger_distance = apf_config.d0;
-
     let apf_path = apf::apf_plan(start, goal, &octree, config);
     let vec = match apf_path {
         Ok(path) => {
@@ -364,7 +322,34 @@ fn octree_update_system(
     };
     path.0 = vec;
 
-    velocity.0 = Vec3::ZERO;
+    let warn_trigger_distance = apf_config.d0;
+    // let (result, obstacle_list) = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
+    // if result {
+    //     let mavlink_args = crash_detector::obstacle_avoidance(&obstacle_list, warn_trigger_distance);
+    //     if mavlink_args.type_mask == 0b010111111111 {
+    //         velocity.0 = Vec3::ZERO;
+    //     }
+    //     else {
+    //         let velocity_mid360 = (mavlink_args.x, mavlink_args.y, mavlink_args.z);
+    //         let velocity_vec_bevy = mid360_to_bevy(velocity_mid360.0, velocity_mid360.1, velocity_mid360.2);
+    //         let velocity_vec = Vec3::new(velocity_vec_bevy.0, velocity_vec_bevy.1, velocity_vec_bevy.2);
+    //         velocity.0 = velocity_vec;
+    //     }
+    // }
+    // else {
+    //     velocity.0 = Vec3::ZERO;
+    // }
+
+    // Crash detection
+    let tup_obstacle_result = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
+    let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
+    velocity.0 = match mavlink_message.type_mask {
+        0b0000001000000000 => {
+            let (x, y, z) = coordinate_switch::frd_to_bevy(mavlink_message.vx, mavlink_message.vy, mavlink_message.vz);
+            Vec3::new(x, y, z)
+        }
+        _ => Vec3::ZERO,
+    };
 }
 
 fn draw_gizmos(

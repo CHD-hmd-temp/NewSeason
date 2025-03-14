@@ -414,26 +414,39 @@ impl Octree {
     //     (sum / total).round() as u8
     // }
 
-    pub fn get_laser_points(&self) -> HashMap<u32, Vec<LaserPoint>> {
+    /// key stands for distance, value stands for laser points
+    pub fn get_laser_points(&self) -> HashMap<u32, Vec<(f32, LaserPoint)>> {
         let mut points = HashMap::new();
         Self::get_laser_points_internal(&self.root, &mut points);
         points
     }
 
 
-    fn get_laser_points_internal(node: &OctreeNode, points: &mut HashMap<u32, Vec<LaserPoint>>) {
+    fn get_laser_points_internal(node: &OctreeNode, points: &mut HashMap<u32, Vec<(f32, LaserPoint)>>) {
         match node {
             OctreeNode::Internal { children, .. } => {
                 for child in children.iter() {
                     Self::get_laser_points_internal(child, points);
                 }
             }
-            OctreeNode::Leaf { depth, laser_points, .. } => {
+            OctreeNode::Leaf { center, laser_points, .. } => {
                 if !laser_points.is_empty() {
-                    points.entry(*depth).or_insert_with(Vec::new).extend(laser_points.iter().cloned());
+                    let distance: f32 = Self::distance_calculator(*center, [0.0, 0.0, 0.0]);
+                    let floored_distance = distance.floor() as u32;
+                    points.entry(floored_distance).or_insert_with(Vec::new).extend(laser_points.iter().map(|p| (distance, p.clone())));
                 }
             }
         }
+    }
+
+    fn distance_calculator(
+        p1: [f32; 3],
+        p2: [f32; 3],
+    ) -> f32 {
+        let x = p1[0] - p2[0];
+        let y = p1[1] - p2[1];
+        let z = p1[2] - p2[2];
+        return (x * x + y * y + z * z).sqrt();
     }
 
     pub fn refresh(&mut self) {
@@ -450,7 +463,6 @@ impl Octree {
         std::mem::swap(&mut self.root, &mut new_root);
         self.root = new_root;
     }
-
 
     //TODO: Implement ray casting
     pub fn cast_ray(&self, origin: [f32; 3], direction: [f32; 3], max_distance: f32) -> Option<f32> {

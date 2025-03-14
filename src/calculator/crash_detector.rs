@@ -37,17 +37,17 @@ pub fn crash_warn_for_octree(
     let octree_map = octree_input.get_laser_points();
     let mut result = false;
     let mut obstacle_list: Vec<(f32, [f32; 3])> = Vec::new();
+    let alert_distance = (warn_trigger_distance * 3.0).floor() as u32;
 
-    for (_, points)  in octree_map {
+    for (distance, points)  in octree_map {
+        if distance > alert_distance {
+            continue;
+        }
         for point in points {
-            let x = point.x;
-            let y = point.y;
-            let z = point.z;
-            let distance = distance_calculator([x, y, z], [0.0, 0.0, 0.0]);
-            if distance < warn_trigger_distance * 3.0 {
+            if point.0 <= warn_trigger_distance {
                 result = true;
-                obstacle_list.push((distance, [x, y, z]));
             }
+            obstacle_list.push((distance as f32, [point.1.x, point.1.y, point.1.z]));
         }
     }
     return (result, obstacle_list);

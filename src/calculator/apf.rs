@@ -99,9 +99,9 @@ pub fn apf_plan(
 
         for (_, points) in &octree_map {
             for point in points {
-                let x = point.x;
-                let y = point.y;
-                let z = point.z;
+                let x = point.1.x;
+                let y = point.1.y;
+                let z = point.1.z;
                 let distance = distance(&current_pos, &Point3::new(x, y, z));
                 if distance < config.d0 {
                     obstacle_list.push((distance, [x, y, z]));
