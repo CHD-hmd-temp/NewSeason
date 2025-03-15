@@ -1,42 +1,15 @@
-#![allow(dead_code)]
 use crate::octree::octree;
-use crate::data_reader::structor::LaserPoint;
-use crate::calculator::mavlink_args::MavlinkArgs;
+use crate::prelude::*;
 use crate::calculator::coordinate_switch::mid360_to_frd;
-
-fn distance_calculator(
-    p1: [f32; 3],
-    p2: [f32; 3],
-) -> f32 {
-    let x = p1[0] - p2[0];
-    let y = p1[1] - p2[1];
-    let z = p1[2] - p2[2];
-    return (x * x + y * y + z * z).sqrt();
-}
-
-pub fn crash_warn_for_point(
-    point: LaserPoint,
-    warn_trigger_distance: f32,
-) -> bool {
-    let x = point.x;
-    let y = point.y;
-    let z = point.z;
-
-    let distance = distance_calculator([x, y, z], [0.0, 0.0, 0.0]);
-    if distance < warn_trigger_distance {
-        return true;
-    }
-    return false;
-}
 
 pub fn crash_warn_for_octree(
     octree_input: &octree::Octree,
     warn_trigger_distance: f32,
-) -> (bool, Vec<(f32, [f32; 3])>) {
+) -> (bool, Vec<(f32, Point3f)>) {
     // TODO: change input to map
     let octree_map = octree_input.get_laser_points();
     let mut result = false;
-    let mut obstacle_list: Vec<(f32, [f32; 3])> = Vec::new();
+    let mut obstacle_list: Vec<(f32, Point3f)> = Vec::new();
     let alert_distance = (warn_trigger_distance * 3.0).floor() as u32;
 
     for (distance, points)  in octree_map {
@@ -47,7 +20,7 @@ pub fn crash_warn_for_octree(
             if point.0 <= warn_trigger_distance {
                 result = true;
             }
-            obstacle_list.push((distance as f32, [point.1.x, point.1.y, point.1.z]));
+            obstacle_list.push((distance as f32, point.1.coordinate));
         }
     }
     return (result, obstacle_list);
@@ -56,7 +29,7 @@ pub fn crash_warn_for_octree(
 // TODO: implement speed_factor
 /// Return velocity vector to avoid obstacles
 pub fn obstacle_avoidance(
-    obstacle_list: &Vec<(f32, [f32; 3])>,
+    obstacle_list: &Vec<(f32, Point3f)>,
     warn_trigger_distance: f32,
     //mavlink_args: &MavlinkArgs,
 ) -> MavlinkArgs {
@@ -89,11 +62,11 @@ pub fn obstacle_avoidance(
         return result;
     }
     let (mut sum_x, mut sum_y, mut sum_z) = (0.0, 0.0, 0.0);
-    for &(distance, [x, y, z]) in &sorted_obstacle_list {
+    for &(distance, coordinate) in &sorted_obstacle_list {
         let weight = 1.0 / (distance.powi(3) + EPSILON);
-        sum_x += -x * weight;
-        sum_y += -y * weight;
-         sum_z += -z * weight;
+        sum_x += -coordinate.x * weight;
+        sum_y += -coordinate.y * weight;
+         sum_z += -coordinate.z * weight;
     }
 
     let _minimum_distance = sorted_obstacle_list[0].0;
@@ -101,8 +74,8 @@ pub fn obstacle_avoidance(
 
     let magnitude = (sum_x.powi(2) + sum_y.powi(2) + sum_z.powi(2)).sqrt();
     if magnitude < EPSILON {
-        let (_, [x, y, z]) = sorted_obstacle_list[0];
-        let dir_mag = distance_calculator([x, y, z], [0.0, 0.0, 0.0]);
+        let (_, coordinate_closest) = sorted_obstacle_list[0];
+        let dir_mag = distance(&coordinate_closest, &Point3f::new(0.0, 0.0, 0.0));
         if dir_mag < EPSILON {
             result.type_mask = 0b010111111111;
             result.yaw_rate = 0.5; // TODO: stop after a while
@@ -110,9 +83,9 @@ pub fn obstacle_avoidance(
         }
         else {
             result.type_mask = 0b0000001000000000;
-            let vx = speed * -x / dir_mag;
-            let vy = speed * -y / dir_mag; // Change O-XYZ to O-FRD
-            let vz = speed * -z / dir_mag;
+            let vx = speed * -coordinate_closest.x / dir_mag;
+            let vy = speed * -coordinate_closest.y / dir_mag; // Change O-XYZ to O-FRD
+            let vz = speed * -coordinate_closest.z / dir_mag;
             let (vx, vy, vz) = mid360_to_frd(vx, vy, vz);
             result.vx = vx;
             result.vy = vy;

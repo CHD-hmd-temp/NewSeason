@@ -1,11 +1,7 @@
 #![allow(dead_code)]
-use nalgebra::{Matrix3, Vector3, Point3};
 use std::collections::HashMap;
-use crate::data_reader::structor::LaserPoint;
+use crate::prelude::{Point3f, Vector3f, Matrix3f, LaserPoint, distance};
 
-type Point3f = Point3<f32>;
-type Vector3f = Vector3<f32>;
-type Matrix3f = Matrix3<f32>;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -18,14 +14,14 @@ pub enum Occupancy {
 #[derive(Debug, Clone)]
 pub enum OctreeNode {
     Internal {
-        bounds: [[f32; 3]; 2],
-        center: [f32; 3],
+        bounds: [Point3f; 2],
+        center: Point3f,
         depth: u32,
         children: [Box<OctreeNode>; 8],
     },
     Leaf {
-        bounds: [[f32; 3]; 2],
-        center: [f32; 3],
+        bounds: [Point3f; 2],
+        center: Point3f,
         depth: u32,
         occupancy: Occupancy,
         reflectivity: [u32; 2],
@@ -35,147 +31,18 @@ pub enum OctreeNode {
     }
 }
 
-impl OctreeNode {
-    /// Cast a ray into the octree and return the distance to the closest hit
-    pub fn cast_ray(
-        &self,
-        origin: [f32; 3],
-        direction: [f32; 3],
-        max_distance: f32,
-        current_min: &mut Option<f32>,
-    ) -> Option<f32> {
-        let bbox = self.bounds();
-        let (t_enter_raw, t_exit) = match Self::aabb_ray_intersection(bbox, origin, direction) {
-            Some((enter, exit)) => (enter, exit),
-            None => return None,
-        };
-
-        // Clamp t_enter to 0.0 if the ray starts inside the AABB
-        let t_enter = t_enter_raw.max(0.0);
-        if t_enter > max_distance || t_exit < 0.0 {
-            return None;
-        }
-
-        match self {
-            OctreeNode::Internal { children, .. } => {
-                let current_max = current_min.map_or(max_distance, |t| t.min(max_distance));
-                let mut candidates = Vec::new();
-
-                // Collect potential child candidates with their enter times
-                for child in children.iter() {
-                    let child_bbox = child.bounds();
-                    if let Some((child_enter_raw, child_exit)) =
-                        Self::aabb_ray_intersection(child_bbox, origin, direction)
-                    {
-                        let child_enter = child_enter_raw.max(0.0);
-                        // Skip children that are too far or behind the ray
-                        if child_enter > current_max || child_exit < 0.0 {
-                            continue;
-                        }
-                        candidates.push((child_enter, child));
-                    }
-                }
-
-                // Sort children by their enter time to process closer ones first
-                candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-                let mut closest = None;
-                for (child_enter, child) in candidates {
-                    // Update the current max distance based on the closest found so far
-                    let current_max = current_min.map_or(max_distance, |t| t.min(max_distance));
-                    if child_enter > current_max {
-                        continue;
-                    }
-
-                    if let Some(t) = child.cast_ray(origin, direction, current_max, current_min) {
-                        // Update closest if this child provides a closer hit
-                        if closest.is_none() || t < closest.unwrap() {
-                            closest = Some(t);
-                        }
-                    }
-                }
-
-                closest
-            }
-
-            OctreeNode::Leaf { occupancy, .. } => {
-                if *occupancy == Occupancy::Occupied && t_enter <= max_distance {
-                    // Update the current_min if this hit is closer
-                    match current_min {
-                        Some(min) if t_enter < *min => {
-                            *current_min = Some(t_enter);
-                            Some(t_enter)
-                        }
-                        None => {
-                            *current_min = Some(t_enter);
-                            Some(t_enter)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    /// Get the AABB bounds of the node
-    pub fn bounds(&self) -> &[[f32; 3]; 2] {
-        match self {
-            OctreeNode::Leaf { bounds, .. } => bounds,
-            OctreeNode::Internal { bounds, .. } => bounds,
-        }
-    }
-
-    /// Determine if a ray intersects with an AABB and compute the intersection parameters
-    fn aabb_ray_intersection(bbox: &[[f32; 3]; 2], origin: [f32; 3], direction: [f32; 3]) -> Option<(f32, f32)> {
-        let mut t_enter = -std::f32::INFINITY;
-        let mut t_leave = std::f32::INFINITY;
-
-        for i in 0..3 {
-            let dir = direction[i];
-            if dir.abs() < std::f32::EPSILON {
-                // Ray is parallel to the axis; check if origin is within the AABB
-                if origin[i] < bbox[0][i] || origin[i] > bbox[1][i] {
-                    return None;
-                }
-                continue;
-            }
-
-            let inv_dir = 1.0 / dir;
-            let t1 = (bbox[0][i] - origin[i]) * inv_dir;
-            let t2 = (bbox[1][i] - origin[i]) * inv_dir;
-
-            let (t_1, t_2) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
-
-            t_enter = t_enter.max(t_1);
-            t_leave = t_leave.min(t_2);
-
-            if t_enter > t_leave {
-                return None;
-            }
-        }
-
-        Some((t_enter, t_leave))
-    }
-}
-
 pub struct Octree {
     root: OctreeNode,
 }
 
 impl Octree {
     pub fn new(
-        bounds: [[f32; 3]; 2]
+        bounds: [Point3f; 2],
     ) -> Self {
         Octree {
             root: OctreeNode::Leaf {
                 bounds,
-                center: [
-                    (bounds[0][0] + bounds[1][0]) / 2.0,
-                    (bounds[0][1] + bounds[1][1]) / 2.0,
-                    (bounds[0][2] + bounds[1][2]) / 2.0,
-                ],
+                center: Point3f::new(0.0, 0.0, 0.0),
                 depth: 0,
                 occupancy: Occupancy::Free,
                 reflectivity: [0, 0],
@@ -195,9 +62,22 @@ impl Octree {
         &mut self,
         point: LaserPoint,
         max_depth: u32,
+        boundary: f32,
     ) -> Result<(), String> {
-        //log::trace!("Inserting point {:?} into octree", point);
-        Self::insert_internal(&mut self.root, point, 0, max_depth)
+        let coordinate = point.coordinate;
+        let epsilon = 0.00001;
+        let mut flag = true;
+        for i in 0..3 {
+            if coordinate[i] < -boundary - epsilon || coordinate[i] > boundary + epsilon {
+                flag = false;
+                break;
+            }
+        }
+        if flag {
+            Self::insert_internal(&mut self.root, point, 0, max_depth)
+        } else {
+            return Ok(());
+        }
     }
 
     fn insert_internal(
@@ -207,19 +87,8 @@ impl Octree {
         max_depth: u32,
     ) -> Result<(), String> {
         // point out-of-bounds check
-        let coordinate = [point.x, point.y, point.z];
+        let coordinate = point.coordinate;
         let point_reflectivity = point.reflectivity as u32;
-        let bounds = match node {
-            OctreeNode::Leaf { bounds, .. } => bounds,
-            OctreeNode::Internal { bounds, .. } => bounds,
-        };
-        let epsilon = 0.00001;
-        for i in 0..3 {
-            if coordinate[i] < bounds[0][i] - epsilon || coordinate[i] > bounds[1][i] + epsilon {
-                //return Err("Point out of bounds".to_string());
-                return Ok(());
-            }
-        }
 
         match node {
             OctreeNode::Internal { center, children, .. } => {
@@ -257,12 +126,12 @@ impl Octree {
     }
 
     fn get_index(
-        center: &[f32; 3],
-        point: [f32; 3]
+        center: &Point3f,
+        point_coordinate: Point3f
     ) -> usize {
         let mut index = 0;
         for i in 0..3 {
-            if point[i] > center[i] {
+            if point_coordinate[i] > center[i] {
                 index |= 1 << i;
             }
         }
@@ -306,25 +175,27 @@ impl Octree {
     }
 
     fn create_children(
-        parent_bounds: &[[f32; 3]; 2],
-        parent_center: &[f32; 3],
+        parent_bounds: &[Point3f; 2],
+        parent_center: &Point3f,
         parent_depth: u32,
         parent_laser_points: Vec<LaserPoint>,
     ) -> [Box<OctreeNode>; 8] {
+        let new_bounds = [Point3f::new(0.0, 0.0, 0.0), Point3f::new(0.0, 0.0, 0.0)];
+        let new_center = Point3f::new(0.0, 0.0, 0.0);
         let mut children: [Box<OctreeNode>; 8] = [
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
-            Box::new(OctreeNode::Leaf { bounds: [[0.0; 3]; 2],center: [0.0; 3], occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
+            Box::new(OctreeNode::Leaf { bounds: new_bounds, center: new_center, occupancy: Occupancy::Free, depth: 0, reflectivity: [0, 0], laser_points: Vec::new(), mu: None, sigma: None }),
         ];
 
         let mut children_laser_points: Vec<Vec<LaserPoint>> = vec![Vec::new(); 8];
         for point in parent_laser_points {
-            let index = Self::get_index(parent_center, [point.x, point.y, point.z]);
+            let index = Self::get_index(parent_center, point.coordinate);
             children_laser_points[index].push(point);
         }
         
@@ -332,11 +203,11 @@ impl Octree {
             let child_bounds = Self::calculate_child_bounds(&parent_bounds, &parent_center, i);
             children[i] = Box::new(OctreeNode::Leaf {
                 bounds: child_bounds,
-                center: [
+                center: Point3f::new(
                     (child_bounds[0][0] + child_bounds[1][0]) / 2.0,
                     (child_bounds[0][1] + child_bounds[1][1]) / 2.0,
                     (child_bounds[0][2] + child_bounds[1][2]) / 2.0,
-                ],
+                ),
                 depth: parent_depth + 1,
                 reflectivity: [0, 0],
                 laser_points: children_laser_points[i].clone(),
@@ -350,10 +221,10 @@ impl Octree {
     }
     
     fn calculate_child_bounds(
-        parent_bounds: &[[f32; 3]; 2],
-        parent_center: &[f32; 3],
+        parent_bounds: &[Point3f; 2],
+        parent_center: &Point3f,
         index: usize,
-    ) -> [[f32; 3]; 2] {
+    ) -> [Point3f; 2] {
         let x_sign = if (index & 1) != 0 { 1.0 } else { -1.0 };
         let y_sign = if (index & 2) != 0 { 1.0 } else { -1.0 };
         let z_sign = if (index & 4) != 0 { 1.0 } else { -1.0 };
@@ -366,16 +237,16 @@ impl Octree {
             z_sign * child_size / 2.0,
         ];
 
-        let child_min = [
-        parent_center[0] + offset[0] - child_size / 2.0 - epsilon,
-        parent_center[1] + offset[1] - child_size / 2.0 - epsilon,
-        parent_center[2] + offset[2] - child_size / 2.0 - epsilon,
-        ];
-        let child_max = [
+        let child_min: Point3f = Point3f::new(
+            parent_center[0] + offset[0] - child_size / 2.0 - epsilon,
+            parent_center[1] + offset[1] - child_size / 2.0 - epsilon,
+            parent_center[2] + offset[2] - child_size / 2.0 - epsilon,
+        );
+        let child_max: Point3f = Point3f::new(
             parent_center[0] + offset[0] + child_size / 2.0 + epsilon,
             parent_center[1] + offset[1] + child_size / 2.0 + epsilon,
             parent_center[2] + offset[2] + child_size / 2.0 + epsilon,
-        ];
+        );
         [child_min, child_max]
     }
 
@@ -431,7 +302,7 @@ impl Octree {
             }
             OctreeNode::Leaf { center, laser_points, .. } => {
                 if !laser_points.is_empty() {
-                    let distance: f32 = Self::distance_calculator(*center, [0.0, 0.0, 0.0]);
+                    let distance: f32 = distance(center, &Point3f::new(0.0, 0.0, 0.0));
                     let floored_distance = distance.floor() as u32;
                     points.entry(floored_distance).or_insert_with(Vec::new).extend(laser_points.iter().map(|p| (distance, p.clone())));
                 }
@@ -439,35 +310,43 @@ impl Octree {
         }
     }
 
-    fn distance_calculator(
-        p1: [f32; 3],
-        p2: [f32; 3],
-    ) -> f32 {
-        let x = p1[0] - p2[0];
-        let y = p1[1] - p2[1];
-        let z = p1[2] - p2[2];
-        return (x * x + y * y + z * z).sqrt();
-    }
-
     pub fn refresh(&mut self) {
-        let mut new_root = OctreeNode::Leaf {
-            bounds: self.get_root_mut().bounds().clone(),
-            center: [0.0; 3],
-            depth: 0,
-            occupancy: Occupancy::Free,
-            reflectivity: [0, 0],
-            laser_points: Vec::new(),
-            mu: None,
-            sigma: None,
+        let old_root = self.root.clone();
+        let mut new_root = match old_root {
+            OctreeNode::Internal { bounds, center, .. } => {
+                OctreeNode::Leaf {
+                    bounds,
+                    center,
+                    depth: 0,
+                    occupancy: Occupancy::Free,
+                    reflectivity: [0, 0],
+                    laser_points: Vec::new(),
+                    mu: None,
+                    sigma: None,
+                }
+            }
+
+            OctreeNode::Leaf { bounds, center, .. } => {
+                OctreeNode::Leaf {
+                    bounds,
+                    center,
+                    depth: 0,
+                    occupancy: Occupancy::Free,
+                    reflectivity: [0, 0],
+                    laser_points: Vec::new(),
+                    mu: None,
+                    sigma: None,
+                }
+            }
         };
         std::mem::swap(&mut self.root, &mut new_root);
         self.root = new_root;
     }
 
     //TODO: Implement ray casting
-    pub fn cast_ray(&self, origin: [f32; 3], direction: [f32; 3], max_distance: f32) -> Option<f32> {
-        self.root.cast_ray(origin, direction, max_distance, &mut None)
-    }
+    // pub fn cast_ray(&self, origin: [f32; 3], direction: [f32; 3], max_distance: f32) -> Option<f32> {
+    //     self.root.cast_ray(origin, direction, max_distance, &mut None)
+    // }
 
     pub fn optimize(&mut self) {
         Self::optimize_recursive_internal(&mut self.root);
@@ -533,11 +412,11 @@ impl Octree {
                 } else {
                     let n = laser_points.len() as f32;
                     let sum = laser_points.iter().fold(Vector3f::zeros(), |acc, p| {
-                        acc + Vector3f::new(p.x, p.y, p.z)
+                        acc + Vector3f::new(p.coordinate.x, p.coordinate.y, p.coordinate.z)
                     });
                     let mean = sum / n;
                     let sum_sq = laser_points.iter().fold(Matrix3f::zeros(), |acc, p| {
-                        let diff = Vector3f::new(p.x, p.y, p.z) - mean;
+                        let diff = Vector3f::new(p.coordinate.x, p.coordinate.y, p.coordinate.z) - mean;
                         acc + diff * diff.transpose()
                     });
                     let cov = sum_sq / n;
@@ -623,11 +502,11 @@ impl Octree {
                 }
                 let n = laser_points.len() as f32;
                 let sum = laser_points.iter().fold(Vector3f::zeros(), |acc, p| {
-                    acc + Vector3f::new(p.x, p.y, p.z)
+                    acc + Vector3f::new(p.coordinate.x, p.coordinate.y, p.coordinate.z)
                 });
                 let mean = sum / n;
                 let sum_sq = laser_points.iter().fold(Matrix3f::zeros(), |acc, p| {
-                    let diff = Vector3f::new(p.x, p.y, p.z) - mean;
+                    let diff = Vector3f::new(p.coordinate.x, p.coordinate.y, p.coordinate.z) - mean;
                     acc + diff * diff.transpose()
                 });
                 let cov = sum_sq / n;

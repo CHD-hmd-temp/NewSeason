@@ -1,6 +1,7 @@
 use crate::data_reader;
 use crate::octree::octree::*;
 use crate::calculator::voxel_grid;
+use crate::prelude::*;
 use std::net::UdpSocket;
 
 pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, frame_integration_time: u32) -> Octree {
@@ -14,13 +15,13 @@ pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, fra
         points = voxel_grid::voxel_grid_filter(&points, voxel_size);
     }
 
-    let mut octree = Octree::new([[-boundary; 3], [boundary; 3]]);
+    let mut octree = Octree::new([Point3f::new(-boundary, -boundary, -boundary), Point3f::new(boundary, boundary, boundary)]);
     if max_depth < 1 {
         max_depth = 6;
     }
 
     for point in points {
-        octree.insert(point, max_depth).unwrap();
+        octree.insert(point, max_depth, boundary).unwrap();
     }
 
     octree

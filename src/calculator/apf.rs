@@ -1,69 +1,32 @@
 #![allow(dead_code)]
-use bevy::ecs::system::Resource;
 use crate::octree::octree::Octree;
-use crate::data_reader::structor::Point3;
-
-#[derive(Debug, Resource)]
-pub struct ApfConfig {
-    pub k_att: f32,   // Attractive force gain
-    pub k_rep: f32,   // Repulsive force gain
-    pub d0: f32,      // Influence radius
-    pub step_size: f32,   // Step size
-    pub epsilon: f32,  // Goal radius
-    pub max_steps: u32, // Maximum iteration steps
-}
-
-impl Default for ApfConfig {
-    fn default() -> Self {
-        Self {
-            k_att: 0.1,
-            k_rep: 0.1,
-            d0: 1.0,
-            step_size: 0.1,
-            epsilon: 0.1,
-            max_steps: 1000,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ApfError {
-    LocalMinimum,
-    MaxStepsReached,
-}
-
-fn distance(a: &Point3, b: &Point3) -> f32 {
-    let dx = a.x - b.x;
-    let dy = a.y - b.y;
-    let dz = a.z - b.z;
-    (dx*dx + dy*dy + dz*dz).sqrt()
-}
+use crate::prelude::*;
 
 fn compute_attractive_force(
-    current: &Point3,
-    goal: &Point3,
+    current: &Point3f,
+    goal: &Point3f,
     k_att: f32
-) -> Point3 {
-    let vec = goal.sub(current);
-    Point3 {
-        x: vec.x * k_att,
-        y: vec.y * k_att,
-        z: vec.z * k_att,
-    }
+) -> Point3f {
+    let vec = goal - current;
+    Point3f::new(
+        vec.x * k_att,
+        vec.y * k_att,
+        vec.z * k_att,
+    )
 }
 
 fn compute_repulsive_force(
-    current: &Point3,
-    obstacles: Vec<(f32, [f32; 3])>,
+    current: &Point3f,
+    obstacles: Vec<(f32, Point3f)>,
     k_rep: f32,
     d0: f32,
-) -> Point3 {
-    let mut f_rep = Point3 { x: 0.0, y: 0.0, z: 0.0 };
+) -> Point3f {
+    let mut f_rep = Point3f::new(0.0, 0.0, 0.0);
 
     for (d, point) in obstacles {
         if d <= d0 && d > 0.0 {
             let term = (1.0/d - 1.0/d0) * k_rep / d.powi(2);
-            let vec = current.sub(&Point3::new(point[0], point[1], point[2]));
+            let vec = current - point;
             f_rep.x += vec.x * term;
             f_rep.y += vec.y * term;
             f_rep.z += vec.z * term;
@@ -73,20 +36,20 @@ fn compute_repulsive_force(
     f_rep
 }
 
-fn add_forces(f_att: Point3, f_rep: Point3) -> Point3 {
-    Point3 {
-        x: f_att.x + f_rep.x,
-        y: f_att.y + f_rep.y,
-        z: f_att.z + f_rep.z,
-    }
+fn add_forces(f_att: Point3f, f_rep: Point3f) -> Point3f {
+    Point3f::new(
+        f_att.x + f_rep.x,
+        f_att.y + f_rep.y,
+        f_att.z + f_rep.z,
+    )
 }
 
 pub fn apf_plan(
-    start: Point3,
-    goal: Point3,
+    start: Point3f,
+    goal: Point3f,
     octree: &Octree,
     config: ApfConfig,
-) -> Result<Vec<Point3>, ApfError> {
+) -> Result<Vec<Point3f>, ApfError> {
     let mut path = vec![start];
     let mut current_pos = start;
     let mut steps = 0;
@@ -95,16 +58,13 @@ pub fn apf_plan(
     while distance(&current_pos, &goal) > config.epsilon && steps < config.max_steps {
         let f_att = compute_attractive_force(&current_pos, &goal, config.k_att);
 
-        let mut obstacle_list: Vec<(f32, [f32; 3])> = Vec::new();
+        let mut obstacle_list: Vec<(f32, Point3f)> = Vec::new();
 
         for (_, points) in &octree_map {
             for point in points {
-                let x = point.1.x;
-                let y = point.1.y;
-                let z = point.1.z;
-                let distance = distance(&current_pos, &Point3::new(x, y, z));
+                let distance = distance(&current_pos, &point.1.coordinate);
                 if distance < config.d0 {
-                    obstacle_list.push((distance, [x, y, z]));
+                    obstacle_list.push((distance, point.1.coordinate));
                 }
             }
         }
@@ -114,12 +74,12 @@ pub fn apf_plan(
         let f_total = add_forces(f_att, f_rep);
 
         // 处理零向量（局部极小）
-        if let Some(direction) = f_total.normalize() {
-            current_pos = Point3 {
-                x: current_pos.x + direction.x * config.step_size,
-                y: current_pos.y + direction.y * config.step_size,
-                z: current_pos.z + direction.z * config.step_size,
-            };
+        if let Some(direction) = normalize(&f_total) {
+            current_pos = Point3f::new(
+                current_pos.x + direction.x * config.step_size,
+                current_pos.y + direction.y * config.step_size,
+                current_pos.z + direction.z * config.step_size,
+            );
             path.push(current_pos);
         } else {
             return Err(ApfError::LocalMinimum);
@@ -132,5 +92,14 @@ pub fn apf_plan(
         Ok(path)
     } else {
         Err(ApfError::MaxStepsReached)
+    }
+}
+
+fn normalize(v: &Point3f) -> Option<Point3f> {
+    let norm = (v.x.powi(2) + v.y.powi(2) + v.z.powi(2)).sqrt();
+    if norm > 0.0 {
+        Some(Point3f::new(v.x / norm, v.y / norm, v.z / norm))
+    } else {
+        None
     }
 }

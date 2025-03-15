@@ -1,46 +1,7 @@
-#![allow(dead_code)]
-use bevy::ecs::system::Resource;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::time::{Duration, Instant};
 use std::io::{Cursor, Error, ErrorKind};
-use crate::data_reader::structor::LaserPoint;
-
-#[derive(Debug, Resource)]
-pub struct ImuData {
-    pub version: u8,
-    pub length: u16,
-    pub time_interval: u16,
-    pub dot_num: u16,
-    pub udp_cnt: u16,
-    pub frame_cnt: u8,
-    pub data_type: u8,
-    pub time_type: u8,
-    pub reserved: Vec<u8>,
-    pub crc32: u32,
-    pub timestamp: u64,
-    pub gyro_x: f32,
-    pub gyro_y: f32,
-    pub gyro_z: f32,
-    pub acc_x: f32,
-    pub acc_y: f32,
-    pub acc_z: f32,
-}
-
-#[derive(Debug)]
-pub struct LaserData {
-    pub version: u8,
-    pub length: u16,
-    pub time_interval: u16,
-    pub dot_num: u16,
-    pub udp_cnt: u16,
-    pub frame_cnt: u8,
-    pub data_type: u8,
-    pub time_type: u8,
-    pub reserved: Vec<u8>,
-    pub crc32: u32,
-    pub timestamp: u64,
-    pub points: Vec<LaserPoint>,
-}
+use crate::prelude::*;
 
 pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
     const HEADER_SIZE: usize = 36;
@@ -107,10 +68,10 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
             continue;
         }
 
+        let coordinate = Point3f::new(x, y, z);
+
         points.push(LaserPoint {
-            x,
-            y,
-            z,
+            coordinate,
             reflectivity,
             //tag,
         });

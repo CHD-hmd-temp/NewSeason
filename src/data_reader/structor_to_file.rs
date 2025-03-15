@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::octree::octree;
-use crate::calculator::mavlink_args::MavlinkArgs;
+use crate::prelude::MavlinkArgs;
 use std::io::Write;
 
 // TODO: implement octree_to_csv

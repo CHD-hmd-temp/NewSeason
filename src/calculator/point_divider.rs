@@ -1,6 +1,9 @@
-use crate::{data_reader::structor::{LaserPoint, NodeForRender}, octree::octree::OctreeNode};
+use crate::prelude::*;
+use crate::octree::octree::*;
 use std::collections::HashMap;
 
+
+#[allow(dead_code)]
 pub fn divide_points(
     points: Vec<LaserPoint>,
 ) -> HashMap<u8, Vec<LaserPoint>> {
@@ -24,10 +27,9 @@ pub fn divide_nodes(
     for node in nodes {
         match node {
             OctreeNode::Leaf { center, reflectivity, .. } => {
+                let coordinate = Point3f::new(center[0], center[1], center[2]);
                 let node = NodeForRender {
-                    x: center[0],
-                    y: center[1],
-                    z: center[2],
+                    coordinate,
                     reflectivity: node_reflectivity_calculator(&reflectivity),
                 };
                 grouped_nodes

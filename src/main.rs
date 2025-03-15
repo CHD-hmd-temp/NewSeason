@@ -2,6 +2,7 @@ mod octree;
 mod data_reader;
 mod visualization;
 mod calculator;
+mod prelude;
 
 fn main() {
     if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {

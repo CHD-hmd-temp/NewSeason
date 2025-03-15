@@ -1,17 +1,15 @@
 #![allow(dead_code)]
 use bevy::prelude::*;
-use bevy_flycam::prelude::*;
 use bevy::color::palettes::css::GOLD;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
 use crate::calculator::{crash_detector, point_divider, coordinate_switch};
-use crate::data_reader::structor::Point3;
-use crate::data_reader::udp_reader::{self, ImuData};
+use crate::data_reader::udp_reader;
 use crate::visualization::color_calculator;
 use crate::octree::creat_octree;
 use crate::calculator::coordinate_switch::mid360_to_bevy;
 use crate::calculator::apf;
-use crate::calculator::apf::ApfConfig;
 use crate::data_reader::io;
+use crate::prelude::*;
 use std::net::UdpSocket;
 
 #[derive(Component)]
@@ -36,7 +34,7 @@ struct FrameIntegrationTime(pub u64);
 pub struct VelocityVector(pub Vec3);
 
 #[derive(Resource)]
-pub struct Path(pub Vec<Point3>);
+pub struct Path(pub Vec<Point3f>);
 
 #[derive(Resource)]
 pub struct OctreeConfig {
@@ -61,11 +59,6 @@ pub fn run_bevy() {
             ..default()
         }))
         .add_plugins( FrameTimeDiagnosticsPlugin)
-        .add_plugins(NoCameraPlayerPlugin)
-        .insert_resource(MovementSettings {
-            sensitivity: 0.00009,
-            speed: 3.0,
-        })
         .insert_resource(OctreeConfig {
             boundary,
             max_depth,
@@ -285,6 +278,7 @@ fn octree_update_system(
             });
 
             for point in group {
+                let point = point.coordinate;
                 let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
                 commands.spawn((
                     Mesh3d(cube_mesh.clone()), // Reuse the same mesh
@@ -297,9 +291,9 @@ fn octree_update_system(
     };
 
     // APF palnning
-    let start = Point3::new(0.0, 0.0, 0.0);
+    let start = Point3f::new(0.0, 0.0, 0.0);
     let goal_mid360 = (5.0, 0.0, 0.0);
-    let goal = Point3::new(goal_mid360.0, goal_mid360.1, goal_mid360.2);
+    let goal = Point3f::new(goal_mid360.0, goal_mid360.1, goal_mid360.2);
 
     let config = ApfConfig {
         k_att: apf_config.k_att,
@@ -323,24 +317,6 @@ fn octree_update_system(
     path.0 = vec;
 
     let warn_trigger_distance = apf_config.d0;
-    // let (result, obstacle_list) = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
-    // if result {
-    //     let mavlink_args = crash_detector::obstacle_avoidance(&obstacle_list, warn_trigger_distance);
-    //     if mavlink_args.type_mask == 0b010111111111 {
-    //         velocity.0 = Vec3::ZERO;
-    //     }
-    //     else {
-    //         let velocity_mid360 = (mavlink_args.x, mavlink_args.y, mavlink_args.z);
-    //         let velocity_vec_bevy = mid360_to_bevy(velocity_mid360.0, velocity_mid360.1, velocity_mid360.2);
-    //         let velocity_vec = Vec3::new(velocity_vec_bevy.0, velocity_vec_bevy.1, velocity_vec_bevy.2);
-    //         velocity.0 = velocity_vec;
-    //     }
-    // }
-    // else {
-    //     velocity.0 = Vec3::ZERO;
-    // }
-
-    // Crash detection
     let tup_obstacle_result = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
     let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
     velocity.0 = match mavlink_message.type_mask {
