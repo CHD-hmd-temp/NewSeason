@@ -10,7 +10,7 @@ pub struct NodeForRender {
     pub reflectivity: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct LaserPoint {
     pub coordinate: Point3f,
     pub reflectivity: u8,
@@ -138,6 +138,29 @@ pub struct ImuData {
     pub acc_z: f32,
 }
 
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct ImuBias {
+    pub acc_x: f32,
+    pub acc_y: f32,
+    pub acc_z: f32,
+    pub gyro_x: f32,
+    pub gyro_y: f32,
+    pub gyro_z: f32,
+}
+
+impl Default for ImuBias {
+    fn default() -> Self {
+        Self {
+            acc_x: 0.0,
+            acc_y: 0.0,
+            acc_z: 0.0,
+            gyro_x: 0.0,
+            gyro_y: 0.0,
+            gyro_z: 0.0,
+        }
+    }
+    
+}
 
 #[allow(dead_code)]
 #[derive(Debug)]

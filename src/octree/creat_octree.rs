@@ -26,3 +26,18 @@ pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, fra
 
     octree
 }
+
+pub fn creat_octree_from_vec(boundary: f32, max_depth: u32, voxel_size: f32, points: Vec<LaserPoint>) -> Octree {
+    let mut max_depth = max_depth;
+
+    let mut octree = Octree::new([Point3f::new(-boundary, -boundary, -boundary), Point3f::new(boundary, boundary, boundary)]);
+    if max_depth < 1 {
+        max_depth = 6;
+    }
+
+    for point in points {
+        octree.insert(point, max_depth, boundary).unwrap();
+    }
+
+    octree
+}

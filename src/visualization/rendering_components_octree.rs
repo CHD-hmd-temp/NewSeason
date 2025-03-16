@@ -2,10 +2,12 @@
 use bevy::prelude::*;
 use bevy::color::palettes::css::GOLD;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
-use crate::calculator::{crash_detector, point_divider, coordinate_switch};
+use crate::calculator::icp::{ICPConfig, ICPOdometry};
+use crate::calculator::voxel_grid::voxel_grid_filter;
+use crate::calculator::{coordinate_switch, crash_detector, imu, point_divider};
 use crate::data_reader::udp_reader;
 use crate::visualization::color_calculator;
-use crate::octree::creat_octree;
+use crate::octree::creat_octree::creat_octree_from_vec;
 use crate::calculator::coordinate_switch::mid360_to_bevy;
 use crate::calculator::apf;
 use crate::data_reader::io;
@@ -27,6 +29,12 @@ struct IMUEntityAcc;
 #[derive(Component)]
 struct IMUEntityGyro;
 
+#[derive(Component)]
+struct ICPEntityTransfer;
+
+#[derive(Component)]
+struct ICPEntityRotation;
+
 #[derive(Resource)]
 struct FrameIntegrationTime(pub u64);
 
@@ -45,8 +53,9 @@ pub struct OctreeConfig {
 }
 
 pub fn run_bevy() {
+    println!("IMU initialization...");
+    let imu_bias = imu::imu_init();
     let boundary: f32 = io::read_with_default("boundary:", 10.0, None);
-    //let boundary: f32 = 10.0;
     let max_depth: u32 = io::read_with_default("max_depth:", 7, None);
     let voxel_size: f32 = io::read_with_default("voxel_size:", 0.08, None);
     let frame_integration_time: u32 = io::read_with_default("frame_integration_time:", 100, None);
@@ -92,6 +101,13 @@ pub fn run_bevy() {
             acc_y: 0.0,
             acc_z: 0.0,
         })
+        .insert_resource(ICPOdometry::new(ICPConfig {
+            num_samples: 600,
+            max_iterations: 20,
+            tolerance: 1e-5,
+            max_correspondence_dist: 1.0,
+        }))
+        .insert_resource(imu_bias)
         .insert_resource(VelocityVector(Vec3::ZERO))
         .insert_resource(Path(Vec::new()))
         .add_systems(Startup,
@@ -113,6 +129,7 @@ pub fn run_bevy() {
             materials: ResMut<Assets<StandardMaterial>>,
             velocity: ResMut<VelocityVector>,
             path: ResMut<Path>,
+            icp_odometry: ResMut<ICPOdometry>,
             octree_config: Res<OctreeConfig>,
             apf_config: Res<ApfConfig>,
             query: Query<'_, '_, Entity, With<OctreeEntity>>|
@@ -122,6 +139,7 @@ pub fn run_bevy() {
                 materials,
                 velocity,
                 path,
+                icp_odometry,
                 octree_config,
                 apf_config,
                 query
@@ -174,7 +192,7 @@ fn setup_bevy(
     // Text on the top left corner
     commands
         .spawn((
-            Text::new("v1.3-Saki"),
+            Text::new("v1.4-Soyo"),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(12.0),
@@ -186,7 +204,7 @@ fn setup_bevy(
     // text shows IMU data
     commands
         .spawn((
-            Text::new("IMU: "),
+            Text::new("Lio: "),
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(48.0),
@@ -196,6 +214,28 @@ fn setup_bevy(
         ))
         .with_children(
             |parent| {
+                parent.spawn((
+                    Text::new("Odom_rotation:"),
+                    ICPEntityRotation,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        bottom: Val::Px(156.0),
+                        left: Val::Px(0.0),
+                        width: Val::Px(500.0),
+                        ..default()
+                    },
+                ));
+                parent.spawn((
+                    Text::new("Odom_transfer:"),
+                    ICPEntityTransfer,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        bottom: Val::Px(104.0),
+                        left: Val::Px(0.0),
+                        width: Val::Px(500.0),
+                        ..default()
+                    },
+                ));
                 parent.spawn((
                     Text::new("Gyro: "),
                     IMUEntityGyro,
@@ -244,6 +284,7 @@ fn octree_update_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut velocity: ResMut<VelocityVector>,
     mut path: ResMut<Path>,
+    mut icp_odometry: ResMut<ICPOdometry>,
     octree_config: Res<OctreeConfig>,
     apf_config: Res<ApfConfig>,
     query: Query<Entity, With<OctreeEntity>>,
@@ -255,7 +296,14 @@ fn octree_update_system(
     let max_depth = octree_config.max_depth;
     let voxel_size = octree_config.voxel_size;
     let frame_integration_time = octree_config.frame_integration_time;
-    let mut octree = creat_octree::creat_octree_from_udp(boundary, max_depth, voxel_size, frame_integration_time);
+    let socket_laserpoint = UdpSocket::bind("0.0.0.0:56301").expect("Port bind failed");
+    let points = udp_reader::read_laserpoint(
+        &socket_laserpoint,
+        frame_integration_time
+    ).unwrap();
+
+    let voxeled_points = voxel_grid_filter(&points, voxel_size);
+    let mut octree = creat_octree_from_vec(boundary, max_depth, voxel_size, voxeled_points);
 
     octree.optimize();
 
@@ -289,6 +337,9 @@ fn octree_update_system(
             }
         }
     };
+
+    // ICP
+    let pose = icp_odometry.process_frame(&points);
 
     // APF palnning
     let start = Point3f::new(0.0, 0.0, 0.0);
@@ -371,16 +422,44 @@ fn update_imu(
     mut param_set: ParamSet<(
         Query<&mut Text, With<IMUEntityGyro>>,
         Query<&mut Text, With<IMUEntityAcc>>,
+        Query<&mut Text, With<ICPEntityRotation>>,
+        Query<&mut Text, With<ICPEntityTransfer>>,
     )>,
+    imu_bias: Res<ImuBias>,
+    icp_odometry: ResMut<ICPOdometry>
 ) {
     let socket_imu = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
     let imu_data = udp_reader::read_imu(&socket_imu).unwrap();
 
     for mut text in param_set.p0().iter_mut() {
-        **text = format!("Gyro: Rad/s\nx:{:6.2}, y:{:6.2}, Z:{:6.2}", imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z);
+        **text = format!("Gyro: Rad/s\nx:{:6.2}, y:{:6.2}, Z:{:6.2}",
+            imu_data.gyro_x - imu_bias.gyro_x,
+            imu_data.gyro_y - imu_bias.gyro_y,
+            imu_data.gyro_z - imu_bias.gyro_z
+        );
     }
 
     for mut text in param_set.p1().iter_mut() {
-        **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}", imu_data.acc_x * 9.8, imu_data.acc_y * 9.8, imu_data.acc_z * 9.8);
+        **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+            (imu_data.acc_x - imu_bias.acc_x) * 9.8,
+            (imu_data.acc_y - imu_bias.acc_y) * 9.8,
+            (imu_data.acc_z - imu_bias.acc_z) * 9.8
+        );
+    }
+
+    for mut text in param_set.p2().iter_mut() {
+        **text = format!("Odom_rotation:\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+            icp_odometry.global_pose.rotation.euler_angles().0,
+            icp_odometry.global_pose.rotation.euler_angles().1,
+            icp_odometry.global_pose.rotation.euler_angles().2
+        );
+    }
+
+    for mut text in param_set.p3().iter_mut() {
+        **text = format!("Odom_transfer:\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+            icp_odometry.global_pose.translation.x,
+            icp_odometry.global_pose.translation.y,
+            icp_odometry.global_pose.translation.z
+        );
     }
 }

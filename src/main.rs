@@ -10,6 +10,7 @@ fn main() {
     }    
 
     visualization::rendering_components_octree::run_bevy();   
+    //test_icp();
 }
 
 #[allow(dead_code)]
@@ -30,4 +31,20 @@ fn async_main() {
 
     // 保持 Tokio 运行时存活（注意：Bevy 可能会无限阻塞，此代码可能无法到达）
     // 通常 Bevy 会接管主线程，Tokio 任务在后台运行
+}
+
+fn test_icp() {
+    let mut icp = calculator::icp::ICPOdometry::new(calculator::icp::ICPConfig {
+        num_samples: 500,
+        max_correspondence_dist: 1.0,
+        max_iterations: 20,
+        tolerance: 1e-5,
+    });
+
+    for _ in 0..10 {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:56301").unwrap();
+        let points = data_reader::udp_reader::read_laserpoint(&socket, 100).unwrap();
+        let pose = icp.process_frame(&points);
+        println!("Pose: {:?}", pose);
+    }
 }
