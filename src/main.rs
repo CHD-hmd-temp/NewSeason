@@ -3,6 +3,7 @@ mod data_reader;
 mod visualization;
 mod calculator;
 mod prelude;
+mod python_api;
 
 fn main() {
     if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
@@ -33,6 +34,7 @@ fn async_main() {
     // 通常 Bevy 会接管主线程，Tokio 任务在后台运行
 }
 
+#[allow(dead_code)]
 fn test_icp() {
     let mut icp = calculator::icp::ICPOdometry::new(calculator::icp::ICPConfig {
         num_samples: 500,

@@ -4,6 +4,7 @@ use crate::calculator::voxel_grid;
 use crate::prelude::*;
 use std::net::UdpSocket;
 
+#[allow(dead_code)]
 pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, frame_integration_time: u32) -> Octree {
     let mut max_depth = max_depth;
     let socket_laserpoint = UdpSocket::bind("0.0.0.0:56301").expect("Port bind failed");
@@ -27,7 +28,7 @@ pub fn creat_octree_from_udp(boundary: f32, max_depth: u32, voxel_size: f32, fra
     octree
 }
 
-pub fn creat_octree_from_vec(boundary: f32, max_depth: u32, voxel_size: f32, points: Vec<LaserPoint>) -> Octree {
+pub fn creat_octree_from_vec(boundary: f32, max_depth: u32, points: Vec<LaserPoint>) -> Octree {
     let mut max_depth = max_depth;
 
     let mut octree = Octree::new([Point3f::new(-boundary, -boundary, -boundary), Point3f::new(boundary, boundary, boundary)]);

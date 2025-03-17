@@ -182,6 +182,7 @@ pub fn parse_imu(data: &[u8]) -> Option<ImuData> {
     }
 }
 
+#[allow(dead_code)]
 /// Test: Asynchronous UDP reader for IMU data
 /// Not stable!
 pub async fn read_imu_async(socket: &tokio::net::UdpSocket) -> std::io::Result<()> {

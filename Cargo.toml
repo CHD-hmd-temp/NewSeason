@@ -3,6 +3,10 @@ name = "WorldWithoutAnime"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "world_without_anime"
+crate-type = ["cdylib"]
+
 [profile.release]
 debug = true
 
@@ -13,6 +17,7 @@ csv = "1.3.1"
 full = "0.3.0"
 kdtree = "0.7.0"
 nalgebra = "0.33.2"
+pyo3 = "0.24.0"
 rand = "0.9.0"
 serde = { version = "1.0.218", features = ["derive"] }
 tokio = {version = "1.43.0", features = ["macros", "rt-multi-thread", "full"]}

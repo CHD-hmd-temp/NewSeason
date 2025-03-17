@@ -4,7 +4,6 @@ use nalgebra::{Isometry3, Rotation3};
 use rand::seq::index::sample;
 use rand::Rng;
 use kdtree::KdTree;
-use std::collections::VecDeque;
 
 /// ICP 激光雷达里程计结构体
 #[derive(Debug, Resource)]

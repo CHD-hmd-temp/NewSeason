@@ -303,7 +303,7 @@ fn octree_update_system(
     ).unwrap();
 
     let voxeled_points = voxel_grid_filter(&points, voxel_size);
-    let mut octree = creat_octree_from_vec(boundary, max_depth, voxel_size, voxeled_points);
+    let mut octree = creat_octree_from_vec(boundary, max_depth, voxeled_points);
 
     octree.optimize();
 
@@ -339,7 +339,7 @@ fn octree_update_system(
     };
 
     // ICP
-    let pose = icp_odometry.process_frame(&points);
+    let _pose = icp_odometry.process_frame(&points);
 
     // APF palnning
     let start = Point3f::new(0.0, 0.0, 0.0);
