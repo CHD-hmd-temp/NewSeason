@@ -57,7 +57,7 @@ pub enum ApfError {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Resource)]
+#[derive(Debug, Clone, Resource)]
 pub struct ImuData {
     pub version: u8,
     pub length: u16,
@@ -99,7 +99,6 @@ impl Default for ImuBias {
             gyro_z: 0.0,
         }
     }
-    
 }
 
 #[allow(dead_code)]
@@ -122,4 +121,12 @@ pub struct LaserData {
 pub fn distance(a: &Point3f, b: &Point3f) -> f32 {
     let diff = a - b;
     diff.norm()
+}
+
+#[derive(Resource)]
+pub struct OctreeConfig {
+    pub boundary: f32,
+    pub max_depth: u32,
+    pub voxel_size: f32,
+    pub frame_integration_time: u32,
 }

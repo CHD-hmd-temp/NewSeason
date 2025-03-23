@@ -5,3 +5,4 @@ pub mod apf;
 pub mod point_divider;
 pub mod icp;
 pub mod imu;
+pub mod kalman_filter;

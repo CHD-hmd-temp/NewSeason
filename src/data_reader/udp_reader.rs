@@ -153,9 +153,9 @@ pub fn parse_imu(data: &[u8]) -> Option<ImuData> {
         let gyro_x = cursor.read_f32::<LittleEndian>().unwrap();
         let gyro_y = cursor.read_f32::<LittleEndian>().unwrap();
         let gyro_z = cursor.read_f32::<LittleEndian>().unwrap();
-        let acc_x = cursor.read_f32::<LittleEndian>().unwrap();
-        let acc_y = cursor.read_f32::<LittleEndian>().unwrap();
-        let acc_z = cursor.read_f32::<LittleEndian>().unwrap();
+        let acc_x = cursor.read_f32::<LittleEndian>().unwrap() * 9.81;
+        let acc_y = cursor.read_f32::<LittleEndian>().unwrap() * 9.81;
+        let acc_z = cursor.read_f32::<LittleEndian>().unwrap() * 9.81;
 
         Some(ImuData {
             version,

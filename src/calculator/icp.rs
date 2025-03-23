@@ -1,7 +1,9 @@
+#![allow(dead_code)]
 use crate::prelude::*;
 use bevy::ecs::system::Resource;
 use nalgebra::{Isometry3, Rotation3};
 use rand::seq::index::sample;
+#[allow(unused_imports)]
 use rand::Rng;
 use kdtree::KdTree;
 

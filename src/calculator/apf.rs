@@ -70,10 +70,8 @@ pub fn apf_plan(
         }
 
         let f_rep = compute_repulsive_force(&current_pos, obstacle_list, config.k_rep, config.d0);
-
         let f_total = add_forces(f_att, f_rep);
 
-        // 处理零向量（局部极小）
         if let Some(direction) = normalize(&f_total) {
             current_pos = Point3f::new(
                 current_pos.x + direction.x * config.step_size,

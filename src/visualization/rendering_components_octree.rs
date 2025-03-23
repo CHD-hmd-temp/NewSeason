@@ -1,10 +1,9 @@
-#![allow(dead_code)]
 use bevy::prelude::*;
 use bevy::color::palettes::css::GOLD;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
 use crate::calculator::icp::{ICPConfig, ICPOdometry};
 use crate::calculator::voxel_grid::voxel_grid_filter;
-use crate::calculator::{coordinate_switch, crash_detector, imu, point_divider};
+use crate::calculator::{self, coordinate_switch, crash_detector, imu, point_divider};
 use crate::data_reader::udp_reader;
 use crate::visualization::color_calculator;
 use crate::octree::creat_octree::creat_octree_from_vec;
@@ -12,10 +11,9 @@ use crate::calculator::coordinate_switch::mid360_to_bevy;
 use crate::calculator::apf;
 use crate::data_reader::io;
 use crate::prelude::*;
+use std::time::Instant;
 use std::net::UdpSocket;
-
-#[derive(Component)]
-struct Ground;
+use crossbeam_channel::{unbounded, Receiver};
 
 #[derive(Component)]
 struct FpsText;
@@ -36,29 +34,68 @@ struct ICPEntityTransfer;
 struct ICPEntityRotation;
 
 #[derive(Resource)]
-struct FrameIntegrationTime(pub u64);
-
-#[derive(Resource)]
 pub struct VelocityVector(pub Vec3);
 
 #[derive(Resource)]
 pub struct Path(pub Vec<Point3f>);
 
-#[derive(Resource)]
-pub struct OctreeConfig {
-    boundary: f32,
-    max_depth: u32,
-    voxel_size: f32,
-    frame_integration_time: u32,
+#[derive(Event)]
+struct ImuDataEvent {
+    acc_x: f32,
+    acc_y: f32,
+    acc_z: f32,
+    vx: f32,
+    vy: f32,
+    vz: f32,
+    roll: f32,
+    pitch: f32,
+    yaw: f32,
+    x: f32,
+    y: f32,
+    z: f32,
 }
+
+#[derive(Resource)]
+struct ImuReceiver(Receiver<ImuDataEvent>);
 
 pub fn run_bevy() {
     println!("IMU initialization...");
-    let imu_bias = imu::imu_init();
+    let imu_bias = imu::imu_init(5);
+    let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
+    let mut imu_kalman = calculator::kalman_filter::imu_kalman_filter_init(imu_socket, 0.01, 0.01);
+    let mut imu_integrator = imu::ImuIntegrator::new(imu_bias);
     let boundary: f32 = io::read_with_default("boundary:", 10.0, None);
     let max_depth: u32 = io::read_with_default("max_depth:", 7, None);
     let voxel_size: f32 = io::read_with_default("voxel_size:", 0.08, None);
     let frame_integration_time: u32 = io::read_with_default("frame_integration_time:", 100, None);
+
+    let (imu_tx, imu_rx) = unbounded();
+
+    std::thread::spawn(move || {
+        let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
+        loop {
+            let dt = Instant::now();
+            let imu_data = udp_reader::read_imu(&imu_socket).unwrap();
+            imu_integrator.update_with_kalman_filter(imu_data, dt.elapsed().as_secs_f32(), &mut imu_kalman);
+
+            let imu_data_event = ImuDataEvent {
+                acc_x: imu_integrator.acc_x,
+                acc_y: imu_integrator.acc_y,
+                acc_z: imu_integrator.acc_z,
+                vx: imu_integrator.vx,
+                vy: imu_integrator.vy,
+                vz: imu_integrator.vz,
+                roll: imu_integrator.roll,
+                pitch: imu_integrator.pitch,
+                yaw: imu_integrator.yaw,
+                x: imu_integrator.x,
+                y: imu_integrator.y,
+                z: imu_integrator.z,
+            };
+            imu_tx.send(imu_data_event).unwrap();
+        }
+    });
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -68,6 +105,8 @@ pub fn run_bevy() {
             ..default()
         }))
         .add_plugins( FrameTimeDiagnosticsPlugin)
+        .add_event::<ImuDataEvent>()
+        .insert_resource(ImuReceiver(imu_rx))
         .insert_resource(OctreeConfig {
             boundary,
             max_depth,
@@ -108,6 +147,8 @@ pub fn run_bevy() {
             max_correspondence_dist: 1.0,
         }))
         .insert_resource(imu_bias)
+        //.insert_resource(imu_integrator)
+        //.insert_resource(imu_kalman)
         .insert_resource(VelocityVector(Vec3::ZERO))
         .insert_resource(Path(Vec::new()))
         .add_systems(Startup,
@@ -121,6 +162,7 @@ pub fn run_bevy() {
                 materials,
             );
         })
+        .add_systems(Update, imu_event_system)
         .add_systems(Update, text_update_system)
         .add_systems(Update, update_imu)
         .add_systems(Update,
@@ -129,7 +171,7 @@ pub fn run_bevy() {
             materials: ResMut<Assets<StandardMaterial>>,
             velocity: ResMut<VelocityVector>,
             path: ResMut<Path>,
-            icp_odometry: ResMut<ICPOdometry>,
+            //icp_odometry: ResMut<ICPOdometry>,
             octree_config: Res<OctreeConfig>,
             apf_config: Res<ApfConfig>,
             query: Query<'_, '_, Entity, With<OctreeEntity>>|
@@ -139,7 +181,7 @@ pub fn run_bevy() {
                 materials,
                 velocity,
                 path,
-                icp_odometry,
+                //icp_odometry,
                 octree_config,
                 apf_config,
                 query
@@ -215,7 +257,7 @@ fn setup_bevy(
         .with_children(
             |parent| {
                 parent.spawn((
-                    Text::new("Odom_rotation:"),
+                    Text::new(""),
                     ICPEntityRotation,
                     Node {
                         position_type: PositionType::Absolute,
@@ -226,7 +268,7 @@ fn setup_bevy(
                     },
                 ));
                 parent.spawn((
-                    Text::new("Odom_transfer:"),
+                    Text::new(""),
                     ICPEntityTransfer,
                     Node {
                         position_type: PositionType::Absolute,
@@ -237,7 +279,7 @@ fn setup_bevy(
                     },
                 ));
                 parent.spawn((
-                    Text::new("Gyro: "),
+                    Text::new(""),
                     IMUEntityGyro,
                     Node {
                         position_type: PositionType::Absolute,
@@ -246,10 +288,9 @@ fn setup_bevy(
                         width: Val::Px(500.0),
                         ..default()
                     },
-                    //TextColor(GOLD.into()),
                 ));
                 parent.spawn((
-                    Text::new("Acc: "),
+                    Text::new(""),
                     IMUEntityAcc,
                     Node {
                         position_type: PositionType::Absolute,
@@ -258,7 +299,6 @@ fn setup_bevy(
                         width: Val::Px(500.0),
                         ..default()
                     },
-                    //TextColor(GOLD.into()),
                 ));
             }
         );
@@ -284,7 +324,7 @@ fn octree_update_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut velocity: ResMut<VelocityVector>,
     mut path: ResMut<Path>,
-    mut icp_odometry: ResMut<ICPOdometry>,
+    //mut icp_odometry: ResMut<ICPOdometry>,
     octree_config: Res<OctreeConfig>,
     apf_config: Res<ApfConfig>,
     query: Query<Entity, With<OctreeEntity>>,
@@ -339,7 +379,7 @@ fn octree_update_system(
     };
 
     // ICP
-    let _pose = icp_odometry.process_frame(&points);
+    //let _pose = icp_odometry.process_frame(&points);
 
     // APF palnning
     let start = Point3f::new(0.0, 0.0, 0.0);
@@ -425,41 +465,57 @@ fn update_imu(
         Query<&mut Text, With<ICPEntityRotation>>,
         Query<&mut Text, With<ICPEntityTransfer>>,
     )>,
-    imu_bias: Res<ImuBias>,
-    icp_odometry: ResMut<ICPOdometry>
+    mut imu_events: EventReader<ImuDataEvent>,
 ) {
-    let socket_imu = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
-    let imu_data = udp_reader::read_imu(&socket_imu).unwrap();
+    if let Some(last_imu) = imu_events.read().last() {
+        let (vx, vy, vz) = coordinate_switch::frd_to_bevy(last_imu.vx, last_imu.vy, last_imu.vz);
+        let (roll, pitch, yaw) = coordinate_switch::mid360_to_bevy(last_imu.roll, last_imu.pitch, last_imu.yaw);
+        let (x, y, z) = coordinate_switch::mid360_to_bevy(last_imu.x, last_imu.y, last_imu.z);
+        let (acc_x, acc_y, acc_z) = coordinate_switch::frd_to_bevy(last_imu.acc_x, last_imu.acc_y, last_imu.acc_z);
+        for mut text in param_set.p0().iter_mut() {
+            **text = format!("Rotation: Rad\nroll:{:6.2}, pitch:{:6.2}, yaw:{:6.2}",
+                roll,
+                pitch,
+                yaw
+            );
+        }
 
-    for mut text in param_set.p0().iter_mut() {
-        **text = format!("Gyro: Rad/s\nx:{:6.2}, y:{:6.2}, Z:{:6.2}",
-            imu_data.gyro_x - imu_bias.gyro_x,
-            imu_data.gyro_y - imu_bias.gyro_y,
-            imu_data.gyro_z - imu_bias.gyro_z
-        );
+        for mut text in param_set.p1().iter_mut() {
+            **text = format!("Transition: m\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                x,
+                y,
+                z
+            );
+        }
+
+        for mut text in param_set.p2().iter_mut() {
+            **text = format!("Speed: m/s\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                vx,
+                vy,
+                vz
+            );
+        }
+        
+        for mut text in param_set.p3().iter_mut() {
+            **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                acc_x,
+                acc_y,
+                acc_z
+            );
+        }
     }
 
-    for mut text in param_set.p1().iter_mut() {
-        **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-            (imu_data.acc_x - imu_bias.acc_x) * 9.8,
-            (imu_data.acc_y - imu_bias.acc_y) * 9.8,
-            (imu_data.acc_z - imu_bias.acc_z) * 9.8
-        );
-    }
+    // for mut text in param_set.p3().iter_mut() {
+    //     **text = format!("Odom_transfer:\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+    //         icp_odometry.global_pose.translation.x,
+    //         icp_odometry.global_pose.translation.y,
+    //         icp_odometry.global_pose.translation.z
+    //     );
+    // }
+}
 
-    for mut text in param_set.p2().iter_mut() {
-        **text = format!("Odom_rotation:\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-            icp_odometry.global_pose.rotation.euler_angles().0,
-            icp_odometry.global_pose.rotation.euler_angles().1,
-            icp_odometry.global_pose.rotation.euler_angles().2
-        );
-    }
-
-    for mut text in param_set.p3().iter_mut() {
-        **text = format!("Odom_transfer:\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-            icp_odometry.global_pose.translation.x,
-            icp_odometry.global_pose.translation.y,
-            icp_odometry.global_pose.translation.z
-        );
+fn imu_event_system(mut events: EventWriter<ImuDataEvent>, imu_receiver: Res<ImuReceiver>) {
+    while let Ok(data) = imu_receiver.0.try_recv() {
+        events.send(data);
     }
 }
