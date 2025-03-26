@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
+use bevy::ecs::event::Event;
+
 use crate::prelude::{Point3f, Vector3f, Matrix3f, LaserPoint, distance};
 
 
@@ -31,6 +33,7 @@ pub enum OctreeNode {
     }
 }
 
+#[derive(Event)]
 pub struct Octree {
     root: OctreeNode,
 }

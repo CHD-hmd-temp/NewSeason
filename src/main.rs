@@ -10,7 +10,8 @@ fn main() {
         panic!("Sensors are not online");
     }    
 
-    visualization::rendering_components_octree::run_bevy();   
+    //visualization::rendering_components_octree::run_bevy();   
+    visualization::rendering_components_channel::run_bevy();
     //test_icp();
     //test_imu();
 }
