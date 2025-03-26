@@ -353,81 +353,83 @@ fn octree_update_system(
     query: Query<Entity, With<OctreeEntity>>,
     mut octree_events: EventReader<Octree>,
 ) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-    if let Some(received_octree) = octree_events.read().last() {
-        let leaves = received_octree.octree_to_map();
-        for (depth, group) in leaves {
-            let cuboid_size = get_size(octree_config.boundary, depth);
-            let grouped_pixel_points = point_divider::divide_nodes(group);
-            let cube_mesh = meshes.add(Mesh::from(
-                Cuboid::new(
-                    cuboid_size,
-                    cuboid_size,
-                    cuboid_size
-                )
-            ));
-
-            for (reflectivity, group) in &grouped_pixel_points {
-                let material = materials.add(StandardMaterial {
-                    emissive: color_calculator::reflectivity_to_color(*reflectivity).into(),
-                    ..default()
-                });
-
-                for point in group {
-                    let point = point.coordinate;
-                    let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
-                    commands.spawn((
-                        Mesh3d(cube_mesh.clone()), // Reuse the same mesh
-                        MeshMaterial3d(material.clone()), // Reuse the same material
-                        Transform::from_translation(Vec3::new(x, y, z)),
-                        OctreeEntity,
-                    ));
+    if !octree_events.is_empty() {
+        for entity in query.iter() {
+            commands.entity(entity).despawn();
+        }
+        if let Some(received_octree) = octree_events.read().last() {
+            let leaves = received_octree.octree_to_map();
+            for (depth, group) in leaves {
+                let cuboid_size = get_size(octree_config.boundary, depth);
+                let grouped_pixel_points = point_divider::divide_nodes(group);
+                let cube_mesh = meshes.add(Mesh::from(
+                    Cuboid::new(
+                        cuboid_size,
+                        cuboid_size,
+                        cuboid_size
+                    )
+                ));
+    
+                for (reflectivity, group) in &grouped_pixel_points {
+                    let material = materials.add(StandardMaterial {
+                        emissive: color_calculator::reflectivity_to_color(*reflectivity).into(),
+                        ..default()
+                    });
+    
+                    for point in group {
+                        let point = point.coordinate;
+                        let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
+                        commands.spawn((
+                            Mesh3d(cube_mesh.clone()), // Reuse the same mesh
+                            MeshMaterial3d(material.clone()), // Reuse the same material
+                            Transform::from_translation(Vec3::new(x, y, z)),
+                            OctreeEntity,
+                        ));
+                    }
                 }
-            }
-        };
-
-        // ICP
-        //let _pose = icp_odometry.process_frame(&points);
-
-        // APF palnning
-        let start = Point3f::new(0.0, 0.0, 0.0);
-        let goal_mid360 = (8.0, 0.0, 0.0);
-        let goal = Point3f::new(goal_mid360.0, goal_mid360.1, goal_mid360.2);
-
-        let config = ApfConfig {
-            k_att: apf_config.k_att,
-            k_rep: apf_config.k_rep,
-            d0: apf_config.d0,
-            epsilon: apf_config.epsilon,
-            max_steps: apf_config.max_steps,
-            step_size: apf_config.step_size,
-        };
-
-        let apf_path = apf::apf_plan(start, goal, &received_octree, config);
-        let vec = match apf_path {
-            Ok(path) => {
-                path
-            }
-            Err(e) => {
-                println!("Error: {:?}", e);
-                Vec::new()
-            }
-        };
-        path.0 = vec;
-
-        let warn_trigger_distance = apf_config.d0;
-        let tup_obstacle_result = crash_detector::crash_warn_for_octree(&received_octree, warn_trigger_distance);
-        let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
-        velocity.0 = match mavlink_message.type_mask {
-            0b0000001000000000 => {
-                let (x, y, z) = coordinate_switch::frd_to_bevy(mavlink_message.vx, mavlink_message.vy, mavlink_message.vz);
-                Vec3::new(x, y, z)
-            }
-            _ => Vec3::ZERO,
-        };
-        
+            };
+    
+            // ICP
+            //let _pose = icp_odometry.process_frame(&points);
+    
+            // APF palnning
+            let start = Point3f::new(0.0, 0.0, 0.0);
+            let goal_mid360 = (8.0, 0.0, 0.0);
+            let goal = Point3f::new(goal_mid360.0, goal_mid360.1, goal_mid360.2);
+    
+            let config = ApfConfig {
+                k_att: apf_config.k_att,
+                k_rep: apf_config.k_rep,
+                d0: apf_config.d0,
+                epsilon: apf_config.epsilon,
+                max_steps: apf_config.max_steps,
+                step_size: apf_config.step_size,
+            };
+    
+            let apf_path = apf::apf_plan(start, goal, &received_octree, config);
+            let vec = match apf_path {
+                Ok(path) => {
+                    path
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                    Vec::new()
+                }
+            };
+            path.0 = vec;
+    
+            let warn_trigger_distance = apf_config.d0;
+            let tup_obstacle_result = crash_detector::crash_warn_for_octree(&received_octree, warn_trigger_distance);
+            let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
+            velocity.0 = match mavlink_message.type_mask {
+                0b0000001000000000 => {
+                    let (x, y, z) = coordinate_switch::frd_to_bevy(mavlink_message.vx, mavlink_message.vy, mavlink_message.vz);
+                    Vec3::new(x, y, z)
+                }
+                _ => Vec3::ZERO,
+            };
+            
+        }
     }
 }
 

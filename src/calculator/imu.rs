@@ -51,6 +51,10 @@ impl ImuIntegrator {
         if is_acc_eqls_to_g(&filtered_data, self.imu_bias.clone()) {
             filtered_data = zero_acc_update(&mut filtered_data);
         }
+
+        if is_gyro_eqls_to_zero(&filtered_data, self.imu_bias.clone()) {
+            filtered_data = zero_gyro_update(&mut filtered_data);
+        }
         
         // 1. 使用四元数更新姿态（陀螺仪积分）
         let delta_angle = Vector3f::new(
@@ -177,6 +181,25 @@ fn is_acc_eqls_to_g(imu_data: &ImuData, imu_bias: ImuBias) -> bool {
         return true;
     };
     false
+}
+
+fn is_gyro_eqls_to_zero(imu_data: &ImuData, imu_bias: ImuBias) -> bool {
+    let gyro = Vector3f::new(imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z);
+    let gyro_bias = Vector3f::new(imu_bias.gyro_x, imu_bias.gyro_y, imu_bias.gyro_z);
+    if gyro.norm() < 0.05 {
+        return true;
+    };
+    if (gyro - gyro_bias).norm() < 0.05 {
+        return true;
+    };
+    false
+}
+
+fn zero_gyro_update(filtered_imu_data: &mut ImuData) -> ImuData {
+    filtered_imu_data.gyro_x = 0.0;
+    filtered_imu_data.gyro_y = 0.0;
+    filtered_imu_data.gyro_z = 0.0;
+    filtered_imu_data.clone()
 }
 
 fn zero_acc_update(filtered_imu_data: &mut ImuData) -> ImuData {
