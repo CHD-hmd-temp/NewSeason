@@ -383,7 +383,7 @@ fn octree_update_system(
 
     // APF palnning
     let start = Point3f::new(0.0, 0.0, 0.0);
-    let goal_mid360 = (5.0, 0.0, 0.0);
+    let goal_mid360 = (8.0, 0.0, 0.0);
     let goal = Point3f::new(goal_mid360.0, goal_mid360.1, goal_mid360.2);
 
     let config = ApfConfig {
