@@ -48,7 +48,7 @@ pub fn apf_plan(
     start: Point3f,
     goal: Point3f,
     octree: &Octree,
-    config: ApfConfig,
+    config: &ApfConfig,
 ) -> Result<Vec<Point3f>, ApfError> {
     let mut path = vec![start];
     let mut current_pos = start;

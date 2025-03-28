@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use std::net::UdpSocket;
 use bevy::prelude::*;
 
-#[derive(Clone, Resource)]
+#[derive(Clone, Resource, Event, Copy)]
 pub struct ImuIntegrator {
     pub imu_bias: ImuBias,
     orientation: UnitQuaternion<f32>,

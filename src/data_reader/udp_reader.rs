@@ -182,28 +182,6 @@ pub fn parse_imu(data: &[u8]) -> Option<ImuData> {
     }
 }
 
-#[allow(dead_code)]
-/// Test: Asynchronous UDP reader for IMU data
-/// Not stable!
-pub async fn read_imu_async(socket: &tokio::net::UdpSocket) -> std::io::Result<()> {
-    let mut buf = [0; 2048];
-    
-    loop {
-        // 异步接收数据
-        let (size, _addr) = socket.recv_from(&mut buf).await?;
-        let packet = &buf[..size];
-        
-        // 直接解析当前数据包
-        if let Some(_data) = parse_imu(packet) {
-            continue;
-            //println!("{:#?}", data);
-            //println!("gyro_x: {}, gyro_y: {}, gyro_z: {}", data.gyro_x, data.gyro_y, data.gyro_z);
-        } else {
-            eprintln!("Failed to parse packet");
-        }
-    }
-}
-
 pub fn read_imu(
     socket: &std::net::UdpSocket,
 ) -> std::io::Result<ImuData> {

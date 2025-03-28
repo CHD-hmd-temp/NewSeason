@@ -406,7 +406,7 @@ fn octree_update_system(
                 step_size: apf_config.step_size,
             };
     
-            let apf_path = apf::apf_plan(start, goal, &received_octree, config);
+            let apf_path = apf::apf_plan(start, goal, &received_octree, &config);
             let vec = match apf_path {
                 Ok(path) => {
                     path
