@@ -42,6 +42,9 @@ struct Msgs {
 }
 
 #[derive(Resource)]
+struct LatestMsgs(Msgs);
+
+#[derive(Resource)]
 struct OctreeConfig {
     boundary: f32,
     max_depth: u32,
@@ -63,10 +66,26 @@ pub fn run_bevy() {
     let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
     let mut imu_kalman = calculator::kalman_filter::imu_kalman_filter_init(imu_socket, 0.01, 0.01);
     let mut imu_integrator = imu::ImuIntegrator::new(imu_bias);
-    let boundary: f32 = io::read_with_default("boundary:", 10.0, None);
-    let max_depth: u32 = io::read_with_default("max_depth:", 7, None);
-    let voxel_size: f32 = io::read_with_default("voxel_size:", 0.08, None);
-    let frame_integration_time: u32 = io::read_with_default("frame_integration_time:", 100, None);
+    let boundary: f32 = io::read_with_default(
+        "boundary:",
+        10.0,
+        None
+    );
+    let max_depth: u32 = io::read_with_default(
+        "max_depth:",
+        7,
+        None
+    );
+    let voxel_size: f32 = io::read_with_default(
+        "voxel_size:",
+        0.08,
+        None
+    );
+    let frame_integration_time: u32 = io::read_with_default(
+        "frame_integration_time:",
+        100,
+        None
+    );
 
     let (imu_tx, imu_rx) = unbounded();
     std::thread::spawn(move || {
@@ -83,7 +102,7 @@ pub fn run_bevy() {
     let (msg_tx, msg_rx) = unbounded();
     std::thread::spawn(move || {
         let lidar_socket = UdpSocket::bind("0.0.0.0:56301").expect("Lidar Port bind failed");
-        let apf_goal = Point3f::new(8.0, 0.0, 0.0);
+        let apf_goal = Point3f::new(5.0, 0.0, 0.0);
         let apf_config = ApfConfig {
             k_att: 2.5,
             k_rep: 2.5,
@@ -156,6 +175,10 @@ pub fn run_bevy() {
         .insert_resource(ImuReceiver(imu_rx))
         .insert_resource(MsgsReceiver(msg_rx))
         .insert_resource(OctreeReceiver(lidar_rx))
+        .insert_resource(LatestMsgs(Msgs {
+            apf_path: Vec::new(),
+            velocity: Vec3::ZERO,
+        }))
         .insert_resource(OctreeConfig {
             boundary,
             max_depth,
@@ -371,12 +394,17 @@ fn octree_update_system(
 
 fn draw_gizmos(
     mut gizmos: Gizmos,
-    mut msgs: EventReader<Msgs>,
+    latest_msgs: Res<LatestMsgs>,
 ) {
-    let msgs = msgs.read().last().unwrap();
-    let (velocity, apf_path) = (&msgs.velocity, &msgs.apf_path);
-
     use std::f32::consts::PI;
+    gizmos.grid(
+        Quat::from_rotation_x(PI / 2.),
+        UVec2::splat(20),
+        Vec2::new(2., 2.),
+        // Light gray
+        LinearRgba::gray(0.35),
+    );
+    let (velocity, apf_path) = (&latest_msgs.0.velocity, &latest_msgs.0.apf_path);
     gizmos.line(
         Vec3::ZERO,
         Vec3::new(velocity.x, velocity.y, velocity.z),
@@ -470,8 +498,8 @@ fn octree_event_system(mut events: EventWriter<Octree>, octree_receiver: Res<Oct
     }
 }
 
-fn msgs_event_system(mut events: EventWriter<Msgs>, msgs_receiver: Res<MsgsReceiver>) {
+fn msgs_event_system(msgs_receiver: Res<MsgsReceiver>, mut latest_msgs: ResMut<LatestMsgs>) {
     while let Ok(data) = msgs_receiver.0.try_recv() {
-        events.send(data);
+        latest_msgs.0 = data;
     }
 }

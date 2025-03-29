@@ -91,7 +91,7 @@ fn run_mid360_with_bevy() -> PyResult<()> {
         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
     }    
 
-    visualization::rendering_components_octree::run_bevy();   
+    visualization::rendering_components::run_bevy();   
     Ok(())
 }
 
