@@ -78,6 +78,31 @@ pub struct ImuData {
     pub acc_z: f32,
 }
 
+#[allow(dead_code)]
+impl ImuData {
+    pub fn new() -> Self {
+        Self {
+            version: 0,
+            length: 0,
+            time_interval: 0,
+            dot_num: 0,
+            udp_cnt: 0,
+            frame_cnt: 0,
+            data_type: 0,
+            time_type: 0,
+            reserved: vec![0; 12],
+            crc32: 0,
+            timestamp: 0,
+            gyro_x: 0.0,
+            gyro_y: 0.0,
+            gyro_z: 0.0,
+            acc_x: 0.0,
+            acc_y: 0.0,
+            acc_z: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Resource)]
 pub struct ImuBias {
     pub acc_x: f32,
@@ -116,6 +141,26 @@ pub struct LaserData {
     pub crc32: u32,
     pub timestamp: u64,
     pub points: Vec<LaserPoint>,
+}
+
+#[allow(dead_code)]
+impl LaserData {
+    pub fn new() -> Self {
+        Self {
+            version: 0,
+            length: 0,
+            time_interval: 0,
+            dot_num: 0,
+            udp_cnt: 0,
+            frame_cnt: 0,
+            data_type: 0,
+            time_type: 0,
+            reserved: vec![0; 12],
+            crc32: 0,
+            timestamp: 0,
+            points: Vec::new(),
+        }
+    }
 }
 
 pub fn distance(a: &Point3f, b: &Point3f) -> f32 {

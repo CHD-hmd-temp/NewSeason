@@ -1,7 +1,24 @@
+use bevy::ecs::event::Event;
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::net::UdpSocket;
 use std::time::{Duration, Instant};
-use std::io::{Cursor, Error, ErrorKind};
+use std::io::{Cursor, Error, ErrorKind, Read};
 use crate::prelude::*;
+
+#[derive(Event)]
+pub struct SensorMessage<T> {
+    pub status: ConnectionState,
+    pub data: Option<T>,
+    pub timestamp: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Clone)]
+pub enum ConnectionState {
+    Connected,
+    Disconnected,
+    Error(String),
+}
 
 pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
     const HEADER_SIZE: usize = 36;
@@ -18,16 +35,20 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
 
     // 解析数据包头部(LaserPoint&IMU数据包)
     let version = cursor.read_u8()?; // 0: 协议版本
-    let length = cursor.read_u16::<LittleEndian>()?; // 1: UDP 包长度
+    let length = cursor.read_u16::<LittleEndian>()?; // 1-2: UDP 包长度
     let time_interval = cursor.read_u16::<LittleEndian>()?; // 3-4: 时间间隔
     let dot_num = cursor.read_u16::<LittleEndian>()?; // 5-6: data包含点云数量
     let udp_cnt = cursor.read_u16::<LittleEndian>()?; // 7-8: UDP包计数
     let farme_cnt = cursor.read_u8()?; // 9: 帧计数
     let data_type = cursor.read_u8()?; // 10: 数据类型
     let time_type = cursor.read_u8()?; // 11: 时间戳类型
-    let reserved1 = cursor.read_u8()?; // 12: 保留字段
-    let crc32 = cursor.read_u32::<LittleEndian>()?; // 13-16: CRC32校验码
-    let timestamp = cursor.read_u64::<LittleEndian>()?; // 17-24: 时间戳
+    
+    // 12-23: 保留字段 - 读取12字节
+    let mut reserved = vec![0u8; 12];
+    cursor.read_exact(&mut reserved)?;
+    
+    let crc32 = cursor.read_u32::<LittleEndian>()?; // 24-27: CRC32校验码
+    let timestamp = cursor.read_u64::<LittleEndian>()?; // 28-35: 时间戳
 
     if data_type != 0x01 {
         return Err(Error::new(
@@ -56,6 +77,7 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
     let point_count = payload.len() / POINT_SIZE;
     let mut points = Vec::with_capacity(point_count);
     let mut payload_cursor = Cursor::new(payload);
+    let minimun_distance = 0.1f32;
 
     for _ in 0..point_count {
         let x = payload_cursor.read_i32::<LittleEndian>()? as f32 / 1000.0;
@@ -64,7 +86,7 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
         let reflectivity = payload_cursor.read_u8()?;
         let _tag = payload_cursor.read_u8()?;
 
-        if x == 0.0 && y == 0.0 && z == 0.0 {
+        if x.abs() < minimun_distance && y.abs() < minimun_distance && z.abs() < minimun_distance {
             continue;
         }
 
@@ -86,7 +108,7 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
         frame_cnt: farme_cnt,
         data_type,
         time_type,
-        reserved: vec![reserved1],
+        reserved,
         crc32,
         timestamp,
         points,
@@ -120,7 +142,6 @@ pub fn read_laserpoint(socket: &std::net::UdpSocket, duration: u32) -> std::io::
                 data_buffer.clear();
 
                 if start_time.elapsed() > Duration::from_millis(duration as u64) {
-
                     return Ok(data_string);
                 }
             }
@@ -205,6 +226,122 @@ pub fn read_imu(
             Err(e) => {
                 eprintln!("Error receiving UDP packet: {}", e);
                 continue;
+            }
+        }
+    }
+}
+
+pub fn read_pointcloud(
+    socket: &UdpSocket,
+    duration: u32,
+) -> SensorMessage<Vec<LaserData>> {
+    let mut buf = [0; 65536];
+    let mut data_buffer = Vec::new();
+    let start_time = Instant::now();
+    let mut vec_laser_data = Vec::new();
+    socket.set_read_timeout(Some(Duration::from_millis(10))).expect("Failed to set socket timeout");
+
+    loop {
+        match socket.recv_from(&mut buf) {
+            Ok((size, _addr)) => {
+                if size == 0 {
+                    return SensorMessage {
+                        status: ConnectionState::Disconnected,
+                        data: None,
+                        timestamp: 0,
+                    };
+                }
+                data_buffer.extend_from_slice(&buf[..size]);
+
+                match parse_laserpoint(&data_buffer) {
+                    Ok(data) => {
+                        vec_laser_data.push(data);
+                    }
+                    Err(e) => {
+                        return SensorMessage {
+                            status: ConnectionState::Error(e.to_string()),
+                            data: None,
+                            timestamp: 0,
+                        };
+                    }
+                }
+                data_buffer.clear();
+
+                if start_time.elapsed() > Duration::from_millis(duration as u64) {
+                    return SensorMessage {
+                        status: ConnectionState::Connected,
+                        data: Some(vec_laser_data),
+                        timestamp: start_time.elapsed().as_millis() as u64,
+                    };
+                }
+            }
+            Err(e) => {
+                match e.kind() {
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                        return SensorMessage {
+                            status: ConnectionState::Disconnected,
+                            data: None,
+                            timestamp: 0,
+                        };
+                    }
+                    _ => {
+                        return SensorMessage {
+                            status: ConnectionState::Error(e.to_string()),
+                            data: None,
+                            timestamp: 0,
+                        };
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn read_imu_data(
+    socket: &UdpSocket,
+) -> SensorMessage<ImuData> {
+    let mut buf = [0; 2048];
+    let mut data_buffer = Vec::new();
+    socket.set_read_timeout(Some(Duration::from_millis(10))).expect("Failed to set socket timeout");
+
+    match socket.recv_from(&mut buf) {
+        Ok((size, _addr)) => {
+            data_buffer.extend_from_slice(&buf[..size]);
+
+            match parse_imu(&data_buffer) {
+                Some(imu_data) => {
+                    let timestamp = imu_data.timestamp;
+                    return SensorMessage {
+                        status: ConnectionState::Connected,
+                        data: Some(imu_data),
+                        timestamp: timestamp,
+                    };
+                }
+                None => {
+                    return SensorMessage {
+                        status: ConnectionState::Error("Failed to parse IMU data".to_string()),
+                        data: None,
+                        timestamp: 0,
+                    };
+                }
+            }
+        }
+        Err(e) => {
+            match e.kind() {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                    return SensorMessage {
+                        status: ConnectionState::Disconnected,
+                        data: None,
+                        timestamp: 0,
+                    };
+                }
+                _ => {
+                    return SensorMessage {
+                        status: ConnectionState::Error(e.to_string()),
+                        data: None,
+                        timestamp: 0,
+                    };
+                }
             }
         }
     }

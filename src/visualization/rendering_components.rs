@@ -4,7 +4,7 @@ use bevy::color::palettes::css::GOLD;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
 use crate::calculator::voxel_grid::voxel_grid_filter;
 use crate::calculator::{self, coordinate_switch, crash_detector, imu, point_divider};
-use crate::data_reader::udp_reader;
+use crate::data_reader::udp_reader::{self, ConnectionState, SensorMessage};
 use crate::visualization::color_calculator;
 use crate::octree::creat_octree::creat_octree_from_vec;
 use crate::calculator::coordinate_switch::mid360_to_bevy;
@@ -35,14 +35,14 @@ struct ICPEntityTransfer;
 #[derive(Component)]
 struct ICPEntityRotation;
 
-#[derive(Event)]
+#[derive(Event, Clone)]
 struct Msgs {
     apf_path: Vec<Point3f>,
     velocity: Vec3,
 }
 
 #[derive(Resource)]
-struct LatestMsgs(Msgs);
+struct LatestMsgs(SensorMessage<Msgs>);
 
 #[derive(Resource)]
 struct OctreeConfig {
@@ -52,13 +52,13 @@ struct OctreeConfig {
 }
 
 #[derive(Resource)]
-struct ImuReceiver(Receiver<ImuIntegrator>);
+struct ImuReceiver(Receiver<SensorMessage<ImuIntegrator>>);
 
 #[derive(Resource)]
-struct OctreeReceiver(Receiver<Octree>);
+struct OctreeReceiver(Receiver<SensorMessage<Octree>>);
 
 #[derive(Resource)]
-struct MsgsReceiver(Receiver<Msgs>);
+struct MsgsReceiver(Receiver<SensorMessage<Msgs>>);
 
 pub fn run_bevy() {
     println!("IMU initialization...");
@@ -92,9 +92,30 @@ pub fn run_bevy() {
         let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Imu Port bind failed");
         loop {
             let dt = Instant::now();
-            let imu_data = udp_reader::read_imu(&imu_socket).unwrap();
-            imu_integrator.update_with_kalman_filter(imu_data, dt.elapsed().as_secs_f32(), &mut imu_kalman);
-            imu_tx.send(imu_integrator).unwrap();
+            let imu_data_msg = udp_reader::read_imu_data(&imu_socket);
+            match imu_data_msg.status {
+                ConnectionState::Connected => {
+                    if let Some(imu_data) = imu_data_msg.data {
+                        imu_integrator.update_with_kalman_filter(imu_data, dt.elapsed().as_secs_f32(), &mut imu_kalman);
+                        let imu_tx_msg = SensorMessage {
+                            status: imu_data_msg.status,
+                            data: Some(imu_integrator.clone()),
+                            timestamp: imu_data_msg.timestamp,
+                        };
+                        let _ = imu_tx.send(imu_tx_msg);
+                    }
+                }
+
+                ConnectionState::Disconnected => {
+                    println!("IMU disconnected!");
+                    continue;
+                }
+
+                ConnectionState::Error(_) => {
+                    println!("IMU error!");
+                    continue;
+                }
+            }
         }
     });
 
@@ -112,14 +133,31 @@ pub fn run_bevy() {
             step_size: 0.1,
         };
         loop {
-            let points = udp_reader::read_laserpoint(
+            let vec_laserdata = udp_reader::read_pointcloud(
                 &lidar_socket,
                 frame_integration_time
-            ).unwrap();
+            );
+
+            let mut points = Vec::new();
+
+            match vec_laserdata.status {
+                ConnectionState::Connected => {
+                    if let Some(data) = vec_laserdata.data {
+                        for laserdata_frame in data {
+                            points.extend(laserdata_frame.points);
+                        }
+                    }
+                }
+                ConnectionState::Disconnected => {
+                    continue;
+                }
+                ConnectionState::Error(_) => {
+                    continue;
+                }
+            }
 
             let voxeled_points = voxel_grid_filter(&points, voxel_size);
             let mut octree = creat_octree_from_vec(boundary, max_depth, voxeled_points);
-
             octree.optimize();
 
             let apf_path = apf::apf_plan(
@@ -154,9 +192,18 @@ pub fn run_bevy() {
                 apf_path: vec,
                 velocity,
             };
-
-            msg_tx.send(msg).unwrap();
-            lidar_tx.send(octree).unwrap();
+            let octree_tx_msg = SensorMessage {
+                status: vec_laserdata.status.clone(),
+                data: Some(octree.clone()),
+                timestamp: vec_laserdata.timestamp,
+            };
+            let msgs_tx_msg = SensorMessage {
+                status: vec_laserdata.status.clone(),
+                data: Some(msg.clone()),
+                timestamp: vec_laserdata.timestamp,
+            };
+            let _ = msg_tx.send(msgs_tx_msg);
+            let _ = lidar_tx.send(octree_tx_msg);
         }
     });
 
@@ -169,15 +216,19 @@ pub fn run_bevy() {
             ..default()
         }))
         .add_plugins( FrameTimeDiagnosticsPlugin)
-        .add_event::<ImuIntegrator>()
-        .add_event::<Octree>()
-        .add_event::<Msgs>()
+        .add_event::<SensorMessage<Octree>>()
+        .add_event::<SensorMessage<Msgs>>()
+        .add_event::<SensorMessage<ImuIntegrator>>()
         .insert_resource(ImuReceiver(imu_rx))
         .insert_resource(MsgsReceiver(msg_rx))
         .insert_resource(OctreeReceiver(lidar_rx))
-        .insert_resource(LatestMsgs(Msgs {
-            apf_path: Vec::new(),
-            velocity: Vec3::ZERO,
+        .insert_resource(LatestMsgs(SensorMessage {
+            status: ConnectionState::Disconnected,
+            data: Msgs {
+                apf_path: Vec::new(),
+                velocity: Vec3::ZERO,
+            }.into(),
+            timestamp: 0,
         }))
         .insert_resource(OctreeConfig {
             boundary,
@@ -206,7 +257,7 @@ pub fn run_bevy() {
             materials: ResMut<Assets<StandardMaterial>>,
             octree_config: Res<OctreeConfig>,
             query: Query<'_, '_, Entity, With<OctreeEntity>>,
-            octree_events: EventReader<Octree>|
+            octree_events: EventReader<SensorMessage<Octree>>|
             octree_update_system(
                 commands,
                 meshes,
@@ -351,50 +402,62 @@ fn octree_update_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     octree_config: Res<OctreeConfig>,
     query: Query<Entity, With<OctreeEntity>>,
-    mut octree_events: EventReader<Octree>,
+    mut octree_events: EventReader<SensorMessage<Octree>>,
 ) {
     if !octree_events.is_empty() {
         for entity in query.iter() {
             commands.entity(entity).despawn();
         }
         if let Some(received_octree) = octree_events.read().last() {
-            let leaves = received_octree.octree_to_map();
-            for (depth, group) in leaves {
-                let cuboid_size = get_size(octree_config.boundary, depth);
-                let grouped_pixel_points = point_divider::divide_nodes(group);
-                let cube_mesh = meshes.add(Mesh::from(
-                    Cuboid::new(
-                        cuboid_size,
-                        cuboid_size,
-                        cuboid_size
-                    )
-                ));
+            match received_octree.status {
+                ConnectionState::Connected => {
+                    if let Some(octree) = received_octree.data.as_ref() {
+                        let leaves = octree.octree_to_map();
+                        for (depth, group) in leaves {
+                            let cuboid_size = get_size(octree_config.boundary, depth);
+                            let grouped_pixel_points = point_divider::divide_nodes(group);
+                            let cube_mesh = meshes.add(Mesh::from(
+                                Cuboid::new(
+                                    cuboid_size,
+                                    cuboid_size,
+                                    cuboid_size
+                                )
+                            ));
     
-                for (reflectivity, group) in &grouped_pixel_points {
-                    let material = materials.add(StandardMaterial {
-                        emissive: color_calculator::reflectivity_to_color(*reflectivity).into(),
-                        ..default()
-                    });
+                            for (reflectivity, group) in &grouped_pixel_points {
+                                let material = materials.add(StandardMaterial {
+                                    emissive: color_calculator::reflectivity_to_color(*reflectivity).into(),
+                                    ..default()
+                                });
     
-                    for point in group {
-                        let point = point.coordinate;
-                        let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
-                        commands.spawn((
-                            Mesh3d(cube_mesh.clone()), // Reuse the same mesh
-                            MeshMaterial3d(material.clone()), // Reuse the same material
-                            Transform::from_translation(Vec3::new(x, y, z)),
-                            OctreeEntity,
-                        ));
+                                for point in group {
+                                    let point = point.coordinate;
+                                    let (x, y, z) = mid360_to_bevy(point.x, point.y, point.z);
+                                    commands.spawn((
+                                        Mesh3d(cube_mesh.clone()), // Reuse the same mesh
+                                        MeshMaterial3d(material.clone()), // Reuse the same material
+                                        Transform::from_translation(Vec3::new(x, y, z)),
+                                        OctreeEntity,
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
-            };
+                ConnectionState::Disconnected => {
+                    println!("Lidar disconnected!");
+                }
+                ConnectionState::Error(_) => {
+                    println!("Lidar error!");
+                }
+            }
         }
     }
 }
 
 fn draw_gizmos(
     mut gizmos: Gizmos,
-    latest_msgs: Res<LatestMsgs>,
+    latest_msgs: ResMut<LatestMsgs>,
 ) {
     use std::f32::consts::PI;
     gizmos.grid(
@@ -404,28 +467,30 @@ fn draw_gizmos(
         // Light gray
         LinearRgba::gray(0.35),
     );
-    let (velocity, apf_path) = (&latest_msgs.0.velocity, &latest_msgs.0.apf_path);
-    gizmos.line(
-        Vec3::ZERO,
-        Vec3::new(velocity.x, velocity.y, velocity.z),
-        Color::srgb_u8(255, 0, 0),
-    );
-    gizmos.grid(
-        Quat::from_rotation_x(PI / 2.),
-        UVec2::splat(20),
-        Vec2::new(2., 2.),
-        // Light gray
-        LinearRgba::gray(0.35),
-    );
-    if apf_path.len() > 1 {
-        for i in 0..apf_path.len() - 1 {
-            let (x, y, z) = mid360_to_bevy(apf_path[i].x, apf_path[i].y, apf_path[i].z);
-            let (x1, y1, z1) = mid360_to_bevy(apf_path[i + 1].x, apf_path[i + 1].y, apf_path[i + 1].z);
-            gizmos.line(
-                Vec3::new(x, y, z),
-                Vec3::new(x1, y1, z1),
-                Color::srgb_u8(0, 255, 0),
-            );
+    if let Some(latest_msgs) = latest_msgs.0.data.as_ref() {
+        let (velocity, apf_path) = (&latest_msgs.velocity, &latest_msgs.apf_path);
+        gizmos.line(
+            Vec3::ZERO,
+            Vec3::new(velocity.x, velocity.y, velocity.z),
+            Color::srgb_u8(255, 0, 0),
+        );
+        gizmos.grid(
+            Quat::from_rotation_x(PI / 2.),
+            UVec2::splat(20),
+            Vec2::new(2., 2.),
+            // Light gray
+            LinearRgba::gray(0.35),
+        );
+        if apf_path.len() > 1 {
+            for i in 0..apf_path.len() - 1 {
+                let (x, y, z) = mid360_to_bevy(apf_path[i].x, apf_path[i].y, apf_path[i].z);
+                let (x1, y1, z1) = mid360_to_bevy(apf_path[i + 1].x, apf_path[i + 1].y, apf_path[i + 1].z);
+                gizmos.line(
+                    Vec3::new(x, y, z),
+                    Vec3::new(x1, y1, z1),
+                    Color::srgb_u8(0, 255, 0),
+                );
+            }
         }
     }
 }
@@ -445,60 +510,77 @@ fn update_imu(
         Query<&mut Text, With<ICPEntityRotation>>,
         Query<&mut Text, With<ICPEntityTransfer>>,
     )>,
-    mut imu_events: EventReader<ImuIntegrator>,
+    mut imu_events: EventReader<SensorMessage<ImuIntegrator>>,
 ) {
     if let Some(last_imu) = imu_events.read().last() {
-        let (vx, vy, vz) = coordinate_switch::frd_to_bevy(last_imu.vx, last_imu.vy, last_imu.vz);
-        let (roll, pitch, yaw) = coordinate_switch::mid360_to_bevy(last_imu.roll, last_imu.pitch, last_imu.yaw);
-        let (x, y, z) = coordinate_switch::mid360_to_bevy(last_imu.x, last_imu.y, last_imu.z);
-        let (acc_x, acc_y, acc_z) = coordinate_switch::frd_to_bevy(last_imu.acc_x, last_imu.acc_y, last_imu.acc_z);
-        for mut text in param_set.p0().iter_mut() {
-            **text = format!("Rotation: Rad\nroll:{:6.2}, pitch:{:6.2}, yaw:{:6.2}",
-                roll,
-                pitch,
-                yaw
-            );
-        }
+        match last_imu.status {
+            ConnectionState::Connected => {
+                let last_imu = last_imu.data.as_ref().unwrap();
+                let (vx, vy, vz) = coordinate_switch::frd_to_bevy(last_imu.vx, last_imu.vy, last_imu.vz);
+                let (roll, pitch, yaw) = coordinate_switch::mid360_to_bevy(last_imu.roll, last_imu.pitch, last_imu.yaw);
+                let (x, y, z) = coordinate_switch::mid360_to_bevy(last_imu.x, last_imu.y, last_imu.z);
+                let (acc_x, acc_y, acc_z) = coordinate_switch::frd_to_bevy(last_imu.acc_x, last_imu.acc_y, last_imu.acc_z);
+                for mut text in param_set.p0().iter_mut() {
+                    **text = format!("Rotation: Rad\nroll:{:6.2}, pitch:{:6.2}, yaw:{:6.2}",
+                        roll,
+                        pitch,
+                        yaw
+                    );
+                }
 
-        for mut text in param_set.p1().iter_mut() {
-            **text = format!("Transition: m\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-                x,
-                y,
-                z
-            );
-        }
+                for mut text in param_set.p1().iter_mut() {
+                    **text = format!("Transition: m\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                        x,
+                        y,
+                        z
+                    );
+                }
 
-        for mut text in param_set.p2().iter_mut() {
-            **text = format!("Speed: m/s\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-                vx,
-                vy,
-                vz
-            );
-        }
-        
-        for mut text in param_set.p3().iter_mut() {
-            **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
-                acc_x,
-                acc_y,
-                acc_z
-            );
+                for mut text in param_set.p2().iter_mut() {
+                    **text = format!("Speed: m/s\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                        vx,
+                        vy,
+                        vz
+                    );
+                }
+                
+                for mut text in param_set.p3().iter_mut() {
+                    **text = format!("Acc: m/s^2\nx:{:6.2}, y:{:6.2}, z:{:6.2}",
+                        acc_x,
+                        acc_y,
+                        acc_z
+                    );
+                }
+            }
+
+            ConnectionState::Disconnected => {
+                for mut text in param_set.p0().iter_mut() {
+                    **text = format!("IMU: Disconnected\nTimestamp: {}", last_imu.timestamp);
+                }
+            }
+
+            ConnectionState::Error(_) => {
+                for mut text in param_set.p0().iter_mut() {
+                    **text = format!("IMU: Error\nTimestamp: {}", last_imu.timestamp);
+                }
+            }
         }
     }
 }
 
-fn imu_event_system(mut events: EventWriter<ImuIntegrator>, imu_receiver: Res<ImuReceiver>) {
+fn imu_event_system(mut events: EventWriter<SensorMessage<ImuIntegrator>>, imu_receiver: Res<ImuReceiver>) {
     while let Ok(data) = imu_receiver.0.try_recv() {
         events.send(data);
     }
 }
 
-fn octree_event_system(mut events: EventWriter<Octree>, octree_receiver: Res<OctreeReceiver>) {
+fn octree_event_system(mut events: EventWriter<SensorMessage<Octree>>, octree_receiver: Res<OctreeReceiver>) {
     while let Ok(data) = octree_receiver.0.try_recv() {
         events.send(data);
     }
 }
 
-fn msgs_event_system(msgs_receiver: Res<MsgsReceiver>, mut latest_msgs: ResMut<LatestMsgs>) {
+fn msgs_event_system(mut latest_msgs: ResMut<LatestMsgs>, msgs_receiver: Res<MsgsReceiver>) {
     while let Ok(data) = msgs_receiver.0.try_recv() {
         latest_msgs.0 = data;
     }
