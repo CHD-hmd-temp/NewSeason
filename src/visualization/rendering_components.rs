@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use bevy::prelude::*;
-use bevy::color::palettes::css::GOLD;
+use bevy::color::palettes::css::{GOLD, RED};
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
 use crate::calculator::voxel_grid::voxel_grid_filter;
 use crate::calculator::{self, coordinate_switch, crash_detector, imu, point_divider};
@@ -21,6 +21,9 @@ use crossbeam_channel::{unbounded, Receiver};
 struct FpsText;
 
 #[derive(Component)]
+struct SensorMessageText;
+
+#[derive(Component)]
 struct OctreeEntity;
 
 #[derive(Component)]
@@ -39,6 +42,12 @@ struct ICPEntityRotation;
 struct Msgs {
     apf_path: Vec<Point3f>,
     velocity: Vec3,
+}
+
+#[derive(Resource)]
+struct ConnectionStateText {
+    status: ConnectionState,
+    message: String,
 }
 
 #[derive(Resource)]
@@ -106,14 +115,13 @@ pub fn run_bevy() {
                     }
                 }
 
-                ConnectionState::Disconnected => {
-                    println!("IMU disconnected!");
-                    continue;
-                }
-
-                ConnectionState::Error(_) => {
-                    println!("IMU error!");
-                    continue;
+                ConnectionState::Disconnected | ConnectionState::Error(_) => {
+                    let imu_tx_msg = SensorMessage {
+                        status: imu_data_msg.status,
+                        data: Some(imu_integrator.clone()),
+                        timestamp: imu_data_msg.timestamp,
+                    };
+                    let _ = imu_tx.send(imu_tx_msg);
                 }
             }
         }
@@ -148,11 +156,19 @@ pub fn run_bevy() {
                         }
                     }
                 }
-                ConnectionState::Disconnected => {
-                    continue;
-                }
-                ConnectionState::Error(_) => {
-                    continue;
+                ConnectionState::Disconnected | ConnectionState::Error(_) => {
+                    let lidar_tx_msg = SensorMessage {
+                        status: vec_laserdata.status.clone(),
+                        data: None,
+                        timestamp: vec_laserdata.timestamp.clone(),
+                    };
+                    let _ = lidar_tx.send(lidar_tx_msg);
+                    let msgs_tx_msg = SensorMessage {
+                        status: vec_laserdata.status.clone(),
+                        data: None,
+                        timestamp: vec_laserdata.timestamp.clone(),
+                    };
+                    let _ = msg_tx.send(msgs_tx_msg);
                 }
             }
 
@@ -222,6 +238,10 @@ pub fn run_bevy() {
         .insert_resource(ImuReceiver(imu_rx))
         .insert_resource(MsgsReceiver(msg_rx))
         .insert_resource(OctreeReceiver(lidar_rx))
+        .insert_resource(ConnectionStateText {
+            status: ConnectionState::Disconnected,
+            message: String::new(),
+        })
         .insert_resource(LatestMsgs(SensorMessage {
             status: ConnectionState::Disconnected,
             data: Msgs {
@@ -246,6 +266,7 @@ pub fn run_bevy() {
                 materials,
             );
         })
+        .add_systems(Update, status_update_system)
         .add_systems(Update, imu_event_system)
         .add_systems(Update, octree_event_system)
         .add_systems(Update, fps_update_system)
@@ -256,6 +277,7 @@ pub fn run_bevy() {
             meshes: ResMut<Assets<Mesh>>,
             materials: ResMut<Assets<StandardMaterial>>,
             octree_config: Res<OctreeConfig>,
+            connection_state_text: ResMut<ConnectionStateText>,
             query: Query<'_, '_, Entity, With<OctreeEntity>>,
             octree_events: EventReader<SensorMessage<Octree>>|
             octree_update_system(
@@ -263,6 +285,7 @@ pub fn run_bevy() {
                 meshes,
                 materials,
                 octree_config,
+                connection_state_text,
                 query,
                 octree_events,
             ))
@@ -381,6 +404,28 @@ fn setup_bevy(
                 ));
             }
         );
+
+    // text shows lidar data
+    commands
+        .spawn((
+            Text::new(""),
+        ))
+        .with_child((
+            Text::new(""),
+            TextFont {
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(RED.into()),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(48.0),
+                left: Val::Px(12.0),
+                width: Val::Px(500.0),
+                ..default()
+            },
+            SensorMessageText,
+        ));
 }
 
 fn fps_update_system(
@@ -396,11 +441,21 @@ fn fps_update_system(
     }
 }
 
+fn status_update_system(
+    mut query: Query<&mut Text, With<SensorMessageText>>,
+    connection_state_text: Res<ConnectionStateText>,
+) {
+    for mut text in query.iter_mut() {
+        **text = format!("{}", connection_state_text.message);
+    }
+}
+
 fn octree_update_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     octree_config: Res<OctreeConfig>,
+    mut connection_state_text: ResMut<ConnectionStateText>,
     query: Query<Entity, With<OctreeEntity>>,
     mut octree_events: EventReader<SensorMessage<Octree>>,
 ) {
@@ -409,7 +464,7 @@ fn octree_update_system(
             commands.entity(entity).despawn();
         }
         if let Some(received_octree) = octree_events.read().last() {
-            match received_octree.status {
+            match &received_octree.status {
                 ConnectionState::Connected => {
                     if let Some(octree) = received_octree.data.as_ref() {
                         let leaves = octree.octree_to_map();
@@ -441,14 +496,19 @@ fn octree_update_system(
                                     ));
                                 }
                             }
+
+                            connection_state_text.status = ConnectionState::Connected;
+                            connection_state_text.message = "".to_string();
                         }
                     }
                 }
                 ConnectionState::Disconnected => {
-                    println!("Lidar disconnected!");
+                    connection_state_text.status = ConnectionState::Disconnected;
+                    connection_state_text.message = "Lidar: Disconnected".to_string();
                 }
-                ConnectionState::Error(_) => {
-                    println!("Lidar error!");
+                ConnectionState::Error(e) => {
+                    connection_state_text.status = ConnectionState::Error(e.clone());
+                    connection_state_text.message = format!("Lidar: Error:\n{:?}", e);
                 }
             }
         }
@@ -521,7 +581,7 @@ fn update_imu(
                 let (x, y, z) = coordinate_switch::mid360_to_bevy(last_imu.x, last_imu.y, last_imu.z);
                 let (acc_x, acc_y, acc_z) = coordinate_switch::frd_to_bevy(last_imu.acc_x, last_imu.acc_y, last_imu.acc_z);
                 for mut text in param_set.p0().iter_mut() {
-                    **text = format!("Rotation: Rad\nroll:{:6.2}, pitch:{:6.2}, yaw:{:6.2}",
+                    **text = format!("Rotation: Degree\nroll:{:6.2}, pitch:{:6.2}, yaw:{:6.2}",
                         roll,
                         pitch,
                         yaw
@@ -553,15 +613,21 @@ fn update_imu(
                 }
             }
 
-            ConnectionState::Disconnected => {
+            ConnectionState::Disconnected | ConnectionState::Error(_) => {
                 for mut text in param_set.p0().iter_mut() {
-                    **text = format!("IMU: Disconnected\nTimestamp: {}", last_imu.timestamp);
+                    **text = format!(
+                        "{:#?}",
+                        last_imu.status.clone()
+                    );
                 }
-            }
-
-            ConnectionState::Error(_) => {
-                for mut text in param_set.p0().iter_mut() {
-                    **text = format!("IMU: Error\nTimestamp: {}", last_imu.timestamp);
+                for mut text in param_set.p1().iter_mut() {
+                    **text = "".to_string();
+                }
+                for mut text in param_set.p2().iter_mut() {
+                    **text = "".to_string();
+                }
+                for mut text in param_set.p3().iter_mut() {
+                    **text = "".to_string();
                 }
             }
         }

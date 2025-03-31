@@ -1,3 +1,4 @@
+use crate::data_reader::udp_reader::ConnectionState;
 use crate::prelude::*;
 use crate::data_reader;
 use bevy::prelude::*;
@@ -80,6 +81,14 @@ pub fn imu_kalman_filter_init(
     q: f32,
     r: f32,
 ) -> ImuKalmanFilter {
-    let init_values = data_reader::udp_reader::read_imu(&imu_socket).unwrap();
-    ImuKalmanFilter::new(&init_values, q, r)
+    let init_values = data_reader::udp_reader::read_imu_data(&imu_socket);
+    match init_values.status {
+        ConnectionState::Connected => {
+            let Some(init_values) = init_values.data else {
+                panic!("Failed to read IMU data");
+            };
+            return ImuKalmanFilter::new(&init_values, q, r)
+        },
+        _ => panic!("{:#?}", init_values.status),
+    };
 }

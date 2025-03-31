@@ -13,7 +13,7 @@ pub struct SensorMessage<T> {
 }
 
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ConnectionState {
     Connected,
     Disconnected,
@@ -203,34 +203,6 @@ pub fn parse_imu(data: &[u8]) -> Option<ImuData> {
     }
 }
 
-pub fn read_imu(
-    socket: &std::net::UdpSocket,
-) -> std::io::Result<ImuData> {
-    let mut buf = [0; 2048];
-    let mut data_buffer = Vec::new();
-
-    loop {
-        match socket.recv_from(&mut buf) {
-            Ok((size, _addr)) => {
-                data_buffer.extend_from_slice(&buf[..size]);
-
-                match parse_imu(&data_buffer) {
-                    Some(imu_data) => {
-                        return Ok(imu_data);
-                    }
-                    None => {
-                        eprintln!("Failed to parse packet");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error receiving UDP packet: {}", e);
-                continue;
-            }
-        }
-    }
-}
-
 pub fn read_pointcloud(
     socket: &UdpSocket,
     duration: u32,
@@ -239,7 +211,7 @@ pub fn read_pointcloud(
     let mut data_buffer = Vec::new();
     let start_time = Instant::now();
     let mut vec_laser_data = Vec::new();
-    socket.set_read_timeout(Some(Duration::from_millis(10))).expect("Failed to set socket timeout");
+    socket.set_read_timeout(Some(Duration::from_millis(50))).expect("Failed to set Lidar socket timeout");
 
     loop {
         match socket.recv_from(&mut buf) {
@@ -302,7 +274,7 @@ pub fn read_imu_data(
 ) -> SensorMessage<ImuData> {
     let mut buf = [0; 2048];
     let mut data_buffer = Vec::new();
-    socket.set_read_timeout(Some(Duration::from_millis(10))).expect("Failed to set socket timeout");
+    socket.set_read_timeout(Some(Duration::from_millis(20))).expect("Failed to set IMU socket timeout");
 
     match socket.recv_from(&mut buf) {
         Ok((size, _addr)) => {

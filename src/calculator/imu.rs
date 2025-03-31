@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::data_reader::udp_reader;
+use crate::data_reader::udp_reader::{self, ConnectionState};
 use crate::calculator::kalman_filter::ImuKalmanFilter;
 use nalgebra::UnitQuaternion;
 use std::time::{Duration, Instant};
@@ -132,20 +132,38 @@ pub fn imu_init(init_time: u64) -> ImuBias {
     let mut accel_sum = Vector3f::zeros();
     let mut gyro_sum  = Vector3f::zeros();
     loop {
-        match udp_reader::read_imu(&socket_imu) {
-            Ok(data) => {
-                accel_sum.x += data.acc_x;
-                accel_sum.y += data.acc_y;
-                accel_sum.z += data.acc_z;
-                gyro_sum.x += data.gyro_x;
-                gyro_sum.y += data.gyro_y;
-                gyro_sum.z += data.gyro_z;
-                count += 1;
+        let imu_data =  udp_reader::read_imu_data(&socket_imu);
+            // Ok(data) => {
+            //     accel_sum.x += data.acc_x;
+            //     accel_sum.y += data.acc_y;
+            //     accel_sum.z += data.acc_z;
+            //     gyro_sum.x += data.gyro_x;
+            //     gyro_sum.y += data.gyro_y;
+            //     gyro_sum.z += data.gyro_z;
+            //     count += 1;
+            // }
+            // Err(e) => {
+            //     eprintln!("Error reading IMU data: {}", e);
+            // }
+            match imu_data.status {
+                ConnectionState::Connected => {
+                    if let Some(imu_data) = imu_data.data {
+                        accel_sum.x += imu_data.acc_x;
+                        accel_sum.y += imu_data.acc_y;
+                        accel_sum.z += imu_data.acc_z;
+                        gyro_sum.x += imu_data.gyro_x;
+                        gyro_sum.y += imu_data.gyro_y;
+                        gyro_sum.z += imu_data.gyro_z;
+                        count += 1;
+                    }
+                }
+
+                _ => {
+                    eprintln!("Error reading IMU data: {:#?}", imu_data.status);
+                    continue;
+                }
             }
-            Err(e) => {
-                eprintln!("Error reading IMU data: {}", e);
-            }
-        }
+
         if time.elapsed() > Duration::from_secs(init_time) {
             break;
         }
