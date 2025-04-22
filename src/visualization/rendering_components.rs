@@ -2,20 +2,14 @@
 use bevy::prelude::*;
 use bevy::color::palettes::css::{GOLD, RED};
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore};
-use crate::calculator::voxel_grid::voxel_grid_filter;
-use crate::calculator::{self, coordinate_switch, crash_detector, imu, point_divider};
-use crate::data_reader::udp_reader::{self, ConnectionState, SensorMessage};
+use crate::calculator::{coordinate_switch, point_divider};
+use crate::data_reader::udp_reader::{ConnectionState, SensorMessage};
 use crate::visualization::color_calculator;
-use crate::octree::creat_octree::creat_octree_from_vec;
 use crate::calculator::coordinate_switch::mid360_to_bevy;
-use crate::calculator::apf;
 use crate::calculator::imu::ImuIntegrator;
-use crate::data_reader::io;
 use crate::octree::octree::Octree;
 use crate::prelude::*;
-use std::time::Instant;
-use std::net::UdpSocket;
-use crossbeam_channel::{unbounded, Receiver};
+use crossbeam_channel::Receiver;
 
 #[derive(Component)]
 struct FpsText;
@@ -39,9 +33,9 @@ struct ICPEntityTransfer;
 struct ICPEntityRotation;
 
 #[derive(Event, Clone)]
-struct Msgs {
-    apf_path: Vec<Point3f>,
-    velocity: Vec3,
+pub struct Msgs {
+    pub apf_path: Vec<Point3f>,
+    pub velocity: Vec3,
 }
 
 #[derive(Resource)]
@@ -69,160 +63,12 @@ struct OctreeReceiver(Receiver<SensorMessage<Octree>>);
 #[derive(Resource)]
 struct MsgsReceiver(Receiver<SensorMessage<Msgs>>);
 
-pub fn run_bevy() {
-    println!("IMU initialization...");
-    let imu_bias = imu::imu_init(5);
-    let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
-    let mut imu_kalman = calculator::kalman_filter::imu_kalman_filter_init(imu_socket, 0.01, 0.01);
-    let mut imu_integrator = imu::ImuIntegrator::new(imu_bias);
-    let boundary: f32 = io::read_with_default(
-        "boundary:",
-        10.0,
-        None
-    );
-    let max_depth: u32 = io::read_with_default(
-        "max_depth:",
-        7,
-        None
-    );
-    let voxel_size: f32 = io::read_with_default(
-        "voxel_size:",
-        0.08,
-        None
-    );
-    let frame_integration_time: u32 = io::read_with_default(
-        "frame_integration_time:",
-        100,
-        None
-    );
-
-    let (imu_tx, imu_rx) = unbounded();
-    std::thread::spawn(move || {
-        let imu_socket = UdpSocket::bind("0.0.0.0:56401").expect("Imu Port bind failed");
-        loop {
-            let dt = Instant::now();
-            let imu_data_msg = udp_reader::read_imu_data(&imu_socket);
-            match imu_data_msg.status {
-                ConnectionState::Connected => {
-                    if let Some(imu_data) = imu_data_msg.data {
-                        imu_integrator.update_with_kalman_filter(imu_data, dt.elapsed().as_secs_f32(), &mut imu_kalman);
-                        let imu_tx_msg = SensorMessage {
-                            status: imu_data_msg.status,
-                            data: Some(imu_integrator.clone()),
-                            timestamp: imu_data_msg.timestamp,
-                        };
-                        let _ = imu_tx.send(imu_tx_msg);
-                    }
-                }
-
-                ConnectionState::Disconnected | ConnectionState::Error(_) => {
-                    let imu_tx_msg = SensorMessage {
-                        status: imu_data_msg.status,
-                        data: Some(imu_integrator.clone()),
-                        timestamp: imu_data_msg.timestamp,
-                    };
-                    let _ = imu_tx.send(imu_tx_msg);
-                }
-            }
-        }
-    });
-
-    let (lidar_tx, lidar_rx) = unbounded();
-    let (msg_tx, msg_rx) = unbounded();
-    std::thread::spawn(move || {
-        let lidar_socket = UdpSocket::bind("0.0.0.0:56301").expect("Lidar Port bind failed");
-        let apf_goal = Point3f::new(5.0, 0.0, 0.0);
-        let apf_config = ApfConfig {
-            k_att: 2.5,
-            k_rep: 2.5,
-            d0: 0.7,
-            epsilon: 0.1,
-            max_steps: 500,
-            step_size: 0.1,
-        };
-        loop {
-            let vec_laserdata = udp_reader::read_pointcloud(
-                &lidar_socket,
-                frame_integration_time
-            );
-
-            let mut points = Vec::new();
-
-            match vec_laserdata.status {
-                ConnectionState::Connected => {
-                    if let Some(data) = vec_laserdata.data {
-                        for laserdata_frame in data {
-                            points.extend(laserdata_frame.points);
-                        }
-                    }
-                }
-                ConnectionState::Disconnected | ConnectionState::Error(_) => {
-                    let lidar_tx_msg = SensorMessage {
-                        status: vec_laserdata.status.clone(),
-                        data: None,
-                        timestamp: vec_laserdata.timestamp.clone(),
-                    };
-                    let _ = lidar_tx.send(lidar_tx_msg);
-                    let msgs_tx_msg = SensorMessage {
-                        status: vec_laserdata.status.clone(),
-                        data: None,
-                        timestamp: vec_laserdata.timestamp.clone(),
-                    };
-                    let _ = msg_tx.send(msgs_tx_msg);
-                }
-            }
-
-            let voxeled_points = voxel_grid_filter(&points, voxel_size);
-            let mut octree = creat_octree_from_vec(boundary, max_depth, voxeled_points);
-            octree.optimize();
-
-            let apf_path = apf::apf_plan(
-                Point3f::new(0.0, 0.0, 0.0),
-                apf_goal,
-                &octree,
-                &apf_config,
-            );
-
-            let vec = match apf_path {
-                Ok(path) => {
-                    path
-                }
-                Err(e) => {
-                    println!("Error: {:?}", e);
-                    Vec::new()
-                }
-            };
-
-            let warn_trigger_distance = apf_config.d0;
-            let tup_obstacle_result = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
-            let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
-            let velocity = match mavlink_message.type_mask {
-                0b0000001000000000 => {
-                    let (x, y, z) = coordinate_switch::frd_to_bevy(mavlink_message.vx, mavlink_message.vy, mavlink_message.vz);
-                    Vec3::new(x, y, z)
-                }
-                _ => Vec3::ZERO,
-            };
-
-            let msg = Msgs {
-                apf_path: vec,
-                velocity,
-            };
-            let octree_tx_msg = SensorMessage {
-                status: vec_laserdata.status.clone(),
-                data: Some(octree.clone()),
-                timestamp: vec_laserdata.timestamp,
-            };
-            let msgs_tx_msg = SensorMessage {
-                status: vec_laserdata.status.clone(),
-                data: Some(msg.clone()),
-                timestamp: vec_laserdata.timestamp,
-            };
-            let _ = msg_tx.send(msgs_tx_msg);
-            let _ = lidar_tx.send(octree_tx_msg);
-        }
-    });
-
+pub fn run_bevy(
+    config_origin: &crate::config::AppConfig,
+    lidar_rx: Receiver<SensorMessage<Octree>>,
+    imu_rx: Receiver<SensorMessage<ImuIntegrator>>,
+    msgs_rx: Receiver<SensorMessage<Msgs>>,
+) {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -236,7 +82,7 @@ pub fn run_bevy() {
         .add_event::<SensorMessage<Msgs>>()
         .add_event::<SensorMessage<ImuIntegrator>>()
         .insert_resource(ImuReceiver(imu_rx))
-        .insert_resource(MsgsReceiver(msg_rx))
+        .insert_resource(MsgsReceiver(msgs_rx))
         .insert_resource(OctreeReceiver(lidar_rx))
         .insert_resource(ConnectionStateText {
             status: ConnectionState::Disconnected,
@@ -251,9 +97,9 @@ pub fn run_bevy() {
             timestamp: 0,
         }))
         .insert_resource(OctreeConfig {
-            boundary,
-            max_depth,
-            voxel_size,
+            boundary: config_origin.octree_config.boundary.clone(),
+            max_depth: config_origin.octree_config.max_depth.clone(),
+            voxel_size: config_origin.octree_config.voxel_size.clone(),
         })
         .add_systems(Startup,
             |commands: Commands,
@@ -298,13 +144,13 @@ fn setup_bevy(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Add a camera at [0, 0, 2] and look at front
+    // Add a camera and look at front
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0., 1.5, 4.).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0., 1.8, 4.).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Add a red sphere to represent the drone at [0, 0, 0]
+    // Add a red sphere to represent the drone
     let sphere_mesh = meshes.add(Sphere::new(0.1));
     let material = materials.add(StandardMaterial {
         emissive: Color::srgb_u8(255, 0, 0).into(),
@@ -576,8 +422,8 @@ fn update_imu(
         match last_imu.status {
             ConnectionState::Connected => {
                 let last_imu = last_imu.data.as_ref().unwrap();
-                let (vx, vy, vz) = coordinate_switch::frd_to_bevy(last_imu.vx, last_imu.vy, last_imu.vz);
-                let (roll, pitch, yaw) = coordinate_switch::mid360_to_bevy(last_imu.roll, last_imu.pitch, last_imu.yaw);
+                let (vx, vy, vz) = coordinate_switch::frd_to_mid360(last_imu.vx, last_imu.vy, last_imu.vz);
+                let (roll, pitch, yaw) = (last_imu.roll, last_imu.pitch, last_imu.yaw);
                 let (x, y, z) = coordinate_switch::mid360_to_bevy(last_imu.x, last_imu.y, last_imu.z);
                 let (acc_x, acc_y, acc_z) = coordinate_switch::frd_to_bevy(last_imu.acc_x, last_imu.acc_y, last_imu.acc_z);
                 for mut text in param_set.p0().iter_mut() {

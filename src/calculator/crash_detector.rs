@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::octree::octree;
 use crate::prelude::*;
 use crate::python_api::MavlinkArgs;
@@ -27,6 +28,7 @@ pub fn crash_warn_for_octree(
     return (result, obstacle_list);
 }
 
+#[allow(dead_code)]
 // TODO: implement speed_factor
 /// Return velocity vector to avoid obstacles
 pub fn obstacle_avoidance(

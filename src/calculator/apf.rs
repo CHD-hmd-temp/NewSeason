@@ -1,6 +1,7 @@
-#![allow(dead_code)]
+#![allow(unused)]
 use crate::octree::octree::Octree;
 use crate::prelude::*;
+use crate::config::ApfConfig;
 
 fn compute_attractive_force(
     current: &Point3f,
@@ -50,6 +51,9 @@ pub fn apf_plan(
     octree: &Octree,
     config: &ApfConfig,
 ) -> Result<Vec<Point3f>, ApfError> {
+    if goal == Point3f::new(0.0, 0.0, 0.0) {
+        return Ok(Vec::new());
+    }
     let mut path = vec![start];
     let mut current_pos = start;
     let mut steps = 0;

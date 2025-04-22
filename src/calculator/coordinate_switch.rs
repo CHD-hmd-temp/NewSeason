@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(unused)]
 pub fn mid360_to_bevy(
     x: f32,
     y: f32,
@@ -29,4 +29,12 @@ pub fn frd_to_bevy(
     z: f32,
 ) -> (f32, f32, f32) {
     return (y, -z, -x)
+}
+
+pub fn frd_to_mid360(
+    x: f32,
+    y: f32,
+    z: f32,
+) -> (f32, f32, f32) {
+    return (x, -y, -z)
 }

@@ -4,3 +4,5 @@ mod calculator;
 mod visualization;
 mod prelude;
 mod python_api;
+mod map;
+mod config;

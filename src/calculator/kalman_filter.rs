@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::data_reader::udp_reader::ConnectionState;
 use crate::prelude::*;
 use crate::data_reader;

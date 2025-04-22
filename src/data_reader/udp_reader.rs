@@ -9,6 +9,7 @@ use crate::prelude::*;
 pub struct SensorMessage<T> {
     pub status: ConnectionState,
     pub data: Option<T>,
+    #[allow(dead_code)]
     pub timestamp: u64,
 }
 
@@ -117,7 +118,9 @@ pub fn parse_laserpoint(data: &[u8]) -> Result<LaserData, Error> {
     Ok(laser_data)
 }
 
-pub fn read_laserpoint(socket: &std::net::UdpSocket, duration: u32) -> std::io::Result<Vec<LaserPoint>> {
+/// Deprecated
+#[allow(dead_code)]
+fn read_laserpoint(socket: &std::net::UdpSocket, duration: u32) -> std::io::Result<Vec<LaserPoint>> {
     // let socket = UdpSocket::bind("0.0.0.0:56301")?;
     // println!("Listening for UDP data on port 56301..");
 
@@ -203,6 +206,7 @@ pub fn parse_imu(data: &[u8]) -> Option<ImuData> {
     }
 }
 
+#[allow(unused)]
 pub fn read_pointcloud(
     socket: &UdpSocket,
     duration: u32,

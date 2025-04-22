@@ -1,0 +1,34 @@
+[hardware_config]
+lidar_socket = "0.0.0.0:56301"
+imu_socket = "0.0.0.0:56401"
+
+[occupancy_map_config]
+res = 0.05
+width = 1000
+height = 1000
+origin = [0.0, 0.0]
+
+[lidar_config]
+dt = 100
+
+[kalman_filter_config]
+q = 0.01
+r = 0.01
+p = 1       # never read
+k = 0.5     # never read
+
+[imu_config]
+init_time = 3
+
+[octree_config]
+boundary = 15
+max_depth = 7
+voxel_size = 0.08
+
+[apf_config]
+k_att = 0.1
+k_rep = 0.1
+d0 = 0.5
+epsilon = 0.1
+step_size = 0.1
+max_steps = 500

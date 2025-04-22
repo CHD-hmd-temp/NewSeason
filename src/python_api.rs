@@ -1,12 +1,4 @@
-use std::net::UdpSocket;
 use pyo3::prelude::*;
-use crate::calculator::voxel_grid;
-use crate::calculator::crash_detector;
-use crate::data_reader::udp_reader;
-use crate::prelude::*;
-use crate::data_reader;
-use crate::visualization;
-use crate::octree::creat_octree;
 
 #[pyclass]
 #[derive(Debug, Clone, Copy)]
@@ -85,64 +77,66 @@ impl MavlinkArgs {
     }
 }
 
-#[pyfunction]
-fn run_mid360_with_bevy() -> PyResult<()> {
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
-        return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
-    }    
 
-    visualization::rendering_components::run_bevy();   
-    Ok(())
-}
 
-#[pyfunction]
-fn run_mid360(callback: Py<PyAny>) -> PyResult<()> {
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
-        return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
-    }
+// #[pyfunction]
+// fn run_mid360_with_bevy() -> PyResult<()> {
+//     if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+//         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
+//     }    
 
-    let octree_config = OctreeConfig {
-        boundary: 2.0,
-        max_depth: 5,
-        voxel_size: 0.05,
-        frame_integration_time: 100,
-    };
+//     visualization::rendering_components::run_bevy();   
+//     Ok(())
+// }
 
-    let warn_trigger_distance = 0.5;
+// #[pyfunction]
+// fn run_mid360(callback: Py<PyAny>) -> PyResult<()> {
+//     if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+//         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
+//     }
 
-    let socket_laserpoint = UdpSocket::bind("0.0.0.0:56301").expect("couldn't bind to address");
-    loop {
-        let points = udp_reader::read_laserpoint(
-            &socket_laserpoint,
-            octree_config.frame_integration_time,
-        ).unwrap();
+//     let octree_config = OctreeConfig {
+//         boundary: 2.0,
+//         max_depth: 5,
+//         voxel_size: 0.05,
+//         frame_integration_time: 100,
+//     };
 
-        let voxeled_points = voxel_grid::voxel_grid_filter(
-            &points,
-            octree_config.voxel_size
-        );
-        let mut octree = creat_octree::creat_octree_from_vec(
-            octree_config.boundary,
-            octree_config.max_depth,
-            voxeled_points,
-        );
+//     let warn_trigger_distance = 0.5;
 
-        octree.optimize();
+//     let socket_laserpoint = UdpSocket::bind("0.0.0.0:56301").expect("couldn't bind to address");
+//     loop {
+//         let points = udp_reader::read_laserpoint(
+//             &socket_laserpoint,
+//             octree_config.frame_integration_time,
+//         ).unwrap();
 
-        let tup_obstacle_result = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
-        let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
+//         let voxeled_points = voxel_grid::voxel_grid_filter(
+//             &points,
+//             octree_config.voxel_size
+//         );
+//         let mut octree = creat_octree::creat_octree_from_vec(
+//             octree_config.boundary,
+//             octree_config.max_depth,
+//             voxeled_points,
+//         );
+
+//         octree.optimize();
+
+//         let tup_obstacle_result = crash_detector::crash_warn_for_octree(&octree, warn_trigger_distance);
+//         let mavlink_message = crash_detector::obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
         
-        Python::with_gil(|py| -> PyResult<()> {
-            callback.call1(py, (mavlink_message,))?;
-            Ok(())
-        })?;
-    }
-}
+//         Python::with_gil(|py| -> PyResult<()> {
+//             callback.call1(py, (mavlink_message,))?;
+//             Ok(())
+//         })?;
+//     }
+// }
 
-#[pymodule]
-fn world_without_anime(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<MavlinkArgs>()?;
-    m.add_function(wrap_pyfunction!(run_mid360, m)?)?;
-    m.add_function(wrap_pyfunction!(run_mid360_with_bevy, m)?)?;
-    Ok(())
-}
+// #[pymodule]
+// fn world_without_anime(m: &Bound<'_, PyModule>) -> PyResult<()> {
+//     m.add_class::<MavlinkArgs>()?;
+//     m.add_function(wrap_pyfunction!(run_mid360, m)?)?;
+//     m.add_function(wrap_pyfunction!(run_mid360_with_bevy, m)?)?;
+//     Ok(())
+// }

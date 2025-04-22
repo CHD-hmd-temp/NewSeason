@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::prelude::*;
 use crate::data_reader::udp_reader::{self, ConnectionState};
 use crate::calculator::kalman_filter::ImuKalmanFilter;
@@ -6,6 +7,7 @@ use std::time::{Duration, Instant};
 use std::net::UdpSocket;
 use bevy::prelude::*;
 
+/// FLU coordinate system
 #[derive(Clone, Resource, Event, Copy)]
 pub struct ImuIntegrator {
     pub imu_bias: ImuBias,
@@ -19,7 +21,7 @@ pub struct ImuIntegrator {
     pub vx: f32,
     pub vy: f32,
     pub vz: f32,
-    pub roll: f32,
+    pub roll: f32, // degrees
     pub pitch: f32,
     pub yaw: f32,
 }

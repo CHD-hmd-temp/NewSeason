@@ -1,9 +1,10 @@
-use nalgebra::{Matrix3, Vector3, Point3};
+use nalgebra::{Matrix3, Vector3, Point3, Point2};
 use bevy::ecs::system::Resource;
 
 pub type Point3f = Point3<f32>;
 pub type Vector3f = Vector3<f32>;
 pub type Matrix3f = Matrix3<f32>;
+pub type Point2f = Point2<f32>;
 
 pub struct NodeForRender {
     pub coordinate: Point3f,
@@ -23,29 +24,6 @@ impl LaserPoint {
         Self {
             coordinate: point,
             reflectivity,
-        }
-    }
-}
-
-#[derive(Debug, Resource)]
-pub struct ApfConfig {
-    pub k_att: f32,   // Attractive force gain
-    pub k_rep: f32,   // Repulsive force gain
-    pub d0: f32,      // Influence radius
-    pub step_size: f32,   // Step size
-    pub epsilon: f32,  // Goal radius
-    pub max_steps: u32, // Maximum iteration steps
-}
-
-impl Default for ApfConfig {
-    fn default() -> Self {
-        Self {
-            k_att: 0.1,
-            k_rep: 0.1,
-            d0: 1.0,
-            step_size: 0.1,
-            epsilon: 0.1,
-            max_steps: 1000,
         }
     }
 }
@@ -166,12 +144,4 @@ impl LaserData {
 pub fn distance(a: &Point3f, b: &Point3f) -> f32 {
     let diff = a - b;
     diff.norm()
-}
-
-#[derive(Resource)]
-pub struct OctreeConfig {
-    pub boundary: f32,
-    pub max_depth: u32,
-    pub voxel_size: f32,
-    pub frame_integration_time: u32,
 }
