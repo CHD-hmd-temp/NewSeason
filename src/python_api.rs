@@ -112,6 +112,8 @@ fn get_mavlink_args(
     use crate::prelude::Point3f;
     use crate::python_api::MavlinkArgs;
 
+    println!("Start");
+
     let config = config_origin.clone();
     let (mavlink_tx, mavlink_rx) = unbounded();
     std::thread::spawn(move || {
@@ -139,6 +141,7 @@ fn get_mavlink_args(
                 }
                 ConnectionState::Disconnected | ConnectionState::Error(_) => {
                     mavlink_vec.push(MavlinkArgs::default());
+                    let _ = mavlink_tx.send(mavlink_vec.clone());
                 }
             }
 
@@ -187,7 +190,7 @@ fn run_mid360(config_path: &str, callback: Py<PyAny>) -> PyResult<()> {
 
     // 创建一个新的线程来处理接收的消息
     std::thread::spawn(move || {
-        for received in mavlink_rx.iter() {
+        for received in mavlink_rx {
             Python::with_gil(|py| {
                 // 调用Python回调
                 if let Err(e) = callback.call1(py, (received,)) {
