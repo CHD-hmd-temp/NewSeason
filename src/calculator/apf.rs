@@ -1,4 +1,6 @@
 #![allow(unused)]
+use bevy::render::render_resource::encase::private::Length;
+
 use crate::octree::octree::Octree;
 use crate::prelude::*;
 use crate::config::ApfConfig;
@@ -92,6 +94,85 @@ pub fn apf_plan(
 
     if distance(&current_pos, &goal) <= config.epsilon {
         Ok(path)
+    } else {
+        Err(ApfError::MaxStepsReached)
+    }
+}
+
+pub fn apf_plan_mavlink(
+    start: Point3f,
+    goal: Point3f,
+    octree: &Octree,
+    config: &ApfConfig,
+) -> Result<Vec<crate::python_api::MavlinkArgs>, ApfError> {
+    use crate::python_api::MavlinkArgs;
+    let mut mavlink_vec = Vec::new();
+    if goal == Point3f::new(0.0, 0.0, 0.0) {
+        mavlink_vec.push(MavlinkArgs::default());
+        return Ok(mavlink_vec);
+    }
+    let mut path = vec![start];
+    let mut current_pos = start;
+    let mut steps = 0;
+    let octree_map = octree.get_laser_points();
+    let mut mavlink_args: MavlinkArgs = MavlinkArgs::default();
+
+    while distance(&current_pos, &goal) > config.epsilon && steps < config.max_steps {
+        let f_att = compute_attractive_force(&current_pos, &goal, config.k_att);
+
+        let mut obstacle_list: Vec<(f32, Point3f)> = Vec::new();
+
+        for (_, points) in &octree_map {
+            for point in points {
+                let distance = distance(&current_pos, &point.1.coordinate);
+                if distance < config.d0 {
+                    obstacle_list.push((distance, point.1.coordinate));
+                }
+            }
+        }
+
+        let f_rep = compute_repulsive_force(&current_pos, obstacle_list, config.k_rep, config.d0);
+        let f_total = add_forces(f_att, f_rep);
+
+        if let Some(direction) = normalize(&f_total) {
+            current_pos = Point3f::new(
+                current_pos.x + direction.x * config.step_size,
+                current_pos.y + direction.y * config.step_size,
+                current_pos.z + direction.z * config.step_size,
+            );
+            path.push(current_pos);
+            if path.length() == 1 {
+                continue;
+            }
+            let velocity = path[path.length() - 1] - path[path.length() - 2];
+            mavlink_args = MavlinkArgs {
+                target_component: 0,
+                target_system: 0,
+                time_boot_ms: 0,
+                coordinate_frame: 0,
+                type_mask: 0,
+                x: 0.,
+                y: 0.,
+                z: 0.,
+                vx: velocity.x,
+                vy: velocity.y,
+                vz: velocity.z,
+                afx: 0.,
+                afy: 0.,
+                afz: 0.,
+                yaw: 0.0,
+                yaw_rate: 0.0,
+            };
+            mavlink_vec.push(mavlink_args);
+        } else {
+            return Err(ApfError::LocalMinimum);
+        }
+
+        steps += 1;
+    }
+
+    if distance(&current_pos, &goal) <= config.epsilon {
+        Ok(mavlink_vec)
     } else {
         Err(ApfError::MaxStepsReached)
     }

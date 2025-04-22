@@ -206,7 +206,7 @@ pub fn run_bevy_via_tunnel(
     });
 
     let (lidar_tx, lidar_rx) = unbounded();
-    let (msg_tx, msgs_rx) = unbounded();
+    let (msgs_tx, msgs_rx) = unbounded();
     std::thread::spawn(move || {
         let lidar_socket = UdpSocket::bind(config.hardware_config.lidar_socket.clone()).expect("Lidar Port bind failed");
         let apf_path_distance = config.octree_config.boundary * 0.7;
@@ -241,7 +241,7 @@ pub fn run_bevy_via_tunnel(
                         data: None,
                         timestamp: vec_laserdata.timestamp.clone(),
                     };
-                    let _ = msg_tx.send(msgs_tx_msg);
+                    let _ = msgs_tx.send(msgs_tx_msg);
                 }
             }
 
@@ -291,10 +291,80 @@ pub fn run_bevy_via_tunnel(
                 data: Some(msg.clone()),
                 timestamp: vec_laserdata.timestamp,
             };
-            let _ = msg_tx.send(msgs_tx_msg);
+            let _ = msgs_tx.send(msgs_tx_msg);
             let _ = lidar_tx.send(octree_tx_msg);
         }
     });
 
     (lidar_rx, imu_rx, msgs_rx)
+}
+
+pub fn _get_mavlink_args(
+    config_origin: &config::AppConfig
+) -> Receiver<Vec<python_api::MavlinkArgs>>     // msgs_r
+{
+    use crossbeam_channel::unbounded;
+    use std::net::UdpSocket;
+    use crate::calculator::apf;
+    use crate::data_reader::udp_reader;
+    use crate::calculator::voxel_grid::voxel_grid_filter;
+    use crate::octree::creat_octree::creat_octree_from_vec;
+    use crate::prelude::Point3f;
+    use crate::python_api::MavlinkArgs;
+
+    let config = config_origin.clone();
+    let (mavlink_tx, mavlink_rx) = unbounded();
+    std::thread::spawn(move || {
+        let lidar_socket = UdpSocket::bind(config.hardware_config.lidar_socket.clone()).expect("Lidar Port bind failed");
+        let apf_path_distance = config.octree_config.boundary * 0.7;
+        let apf_goal = Point3f::new(apf_path_distance, 0.0, 0.0);
+        let apf_config = config.apf_config.clone();
+        let octree_config = config.octree_config.clone();
+        let mut mavlink_vec: Vec<MavlinkArgs> = Vec::new();
+        loop {
+            let vec_laserdata = udp_reader::read_pointcloud(
+                &lidar_socket,
+                config.lidar_config.dt.clone(),
+            );
+
+            let mut points = Vec::new();
+
+            match vec_laserdata.status {
+                ConnectionState::Connected => {
+                    if let Some(data) = vec_laserdata.data {
+                        for laserdata_frame in data {
+                            points.extend(laserdata_frame.points);
+                        }
+                    }
+                }
+                ConnectionState::Disconnected | ConnectionState::Error(_) => {
+                    mavlink_vec.push(MavlinkArgs::default());
+                }
+            }
+
+            let voxeled_points = voxel_grid_filter(&points, octree_config.voxel_size);
+            let mut octree = creat_octree_from_vec(octree_config.boundary, octree_config.max_depth, voxeled_points);
+            octree.optimize();
+
+            let apf_path = apf::apf_plan_mavlink(
+                Point3f::new(0.0, 0.0, 0.0),
+                apf_goal,
+                &octree,
+                &apf_config,
+            );
+
+            match apf_path {
+                Ok(path) => {
+                    let _ = mavlink_tx.send(path.clone());
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                    mavlink_vec.push(MavlinkArgs::default());
+                    let _ = mavlink_tx.send(mavlink_vec.clone());
+                }
+            };
+        }
+    });
+
+    mavlink_rx
 }
