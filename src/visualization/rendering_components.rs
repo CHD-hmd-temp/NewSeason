@@ -147,11 +147,11 @@ fn setup_bevy(
     // Add a camera and look at front
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0., 1.8, 4.).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0., 1.8, 3.).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Add a red sphere to represent the drone
-    let sphere_mesh = meshes.add(Sphere::new(0.1));
+    let sphere_mesh = meshes.add(Sphere::new(0.05));
     let material = materials.add(StandardMaterial {
         emissive: Color::srgb_u8(255, 0, 0).into(),
         ..default()

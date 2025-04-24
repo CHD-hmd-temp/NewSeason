@@ -3,6 +3,6 @@ mod octree;
 mod calculator;
 mod visualization;
 mod prelude;
-mod python_api;
+mod api;
 mod map;
 mod config;

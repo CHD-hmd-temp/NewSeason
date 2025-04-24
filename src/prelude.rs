@@ -29,9 +29,9 @@ impl LaserPoint {
 }
 
 #[derive(Debug)]
-pub enum ApfError {
-    LocalMinimum,
-    MaxStepsReached,
+pub enum ApfError<T> {
+    LocalMinimum(Vec<T>),
+    MaxStepsReached(Vec<T>),
 }
 
 #[allow(dead_code)]

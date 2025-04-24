@@ -1,7 +1,7 @@
 #![allow(unused)]
 use crate::octree::octree;
 use crate::prelude::*;
-use crate::python_api::MavlinkArgs;
+use crate::api::MavlinkArgs;
 use crate::calculator::coordinate_switch::mid360_to_frd;
 
 pub fn crash_warn_for_octree(
@@ -107,4 +107,49 @@ pub fn obstacle_avoidance(
         result.vz = vz;
         return result;
     }
+}
+
+/// @brief Check if there is an obstacle in the given direction and distance, FLR coordinate system (MID360)
+/// @param octree_map The octree map containing the obstacles
+/// @param degree The direction in degrees, 0 degrees is forward, 90 degrees is left, 180 degrees is backward, and 270 degrees is right
+/// @param distance The distance to check for obstacles
+use std::collections::HashMap;
+pub fn has_obstacle_in_direction(
+    octree_map: &HashMap<u32, Vec<(f32, LaserPoint)>>,
+    degree: f32,
+    distance: f32,
+) -> bool {
+    let radian = degree.to_radians();
+    let (dir_x, dir_y) = (radian.cos(), radian.sin());
+    let angle_threshold = 10f32.to_radians(); // ±10度检测范围
+    let cos_threshold = angle_threshold.cos();
+    let distance_sq = distance.powi(2);
+
+    // 遍历所有激光点
+    for (_, points) in octree_map {
+        for (_, point) in points {
+            let coord = point.coordinate;
+            
+            // 计算水平面距离平方（优化性能）
+            let dx = coord.x;
+            let dy = coord.y;
+            let d_sq = dx.powi(2) + dy.powi(2);
+            
+            // 快速排除远处点
+            if d_sq > distance_sq {
+                continue;
+            }
+
+            // 计算点积和夹角
+            let dot_product = dx * dir_x + dy * dir_y;
+            let magnitude = d_sq.sqrt();
+            
+            // 当点与方向夹角在阈值范围内时
+            if (dot_product / magnitude) >= cos_threshold {
+                return true; // 发现有效障碍物
+            }
+        }
+    }
+    
+    false // 未发现障碍物
 }

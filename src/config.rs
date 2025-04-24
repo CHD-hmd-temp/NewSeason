@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub occupancy_map_config: OccupancyMapConfig,
     pub octree_config: OctreeConfig,
     pub apf_config: ApfConfig,
+    pub l_shape_navigation_config: LShapeNavigationConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,6 +61,11 @@ pub struct ApfConfig {
     pub step_size: f32,   // Step size
     pub epsilon: f32,  // Goal radius
     pub max_steps: u32, // Maximum iteration steps
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LShapeNavigationConfig {
+    pub d0: f32,
 }
 
 
@@ -121,6 +127,9 @@ impl Default for AppConfig {
                 epsilon: 0.1,
                 max_steps: 250,
             },
+            l_shape_navigation_config: LShapeNavigationConfig {
+                d0: 0.5,
+            },
         }
     }
 }
@@ -142,6 +151,7 @@ pub fn load_config(config_path: &str) -> Result<AppConfig, Box<dyn std::error::E
         config.lidar_config = file_config.lidar_config;
         config.imu_config = file_config.imu_config;
         config.kalman_filter_config = file_config.kalman_filter_config;
+        config.l_shape_navigation_config = file_config.l_shape_navigation_config;
     }
 
     Ok(config)
