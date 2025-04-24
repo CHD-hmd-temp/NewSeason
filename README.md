@@ -4,32 +4,93 @@
 
 ![alt text](doc/example.png)
 
-编写时截止至1f9b9cf，v1.4-Soyo
+编写时截止至0fe0a40，v1.4-Soyo
 
-## 主要数据结构
+## 使用说明
 
-### LaserPoint
+### 配置文件
 
-代表单个点云，存储其三维坐标和反射率信息
+格式如下，保证所有元素都正确赋值
 
-### LaserData
+``` toml
+[hardware_config]
+lidar_socket = "0.0.0.0:56301"
+imu_socket = "0.0.0.0:56401"
 
-代表相同时间戳下读取的同一个点云数据包，包含时间戳，CRC校验码等。
+[occupancy_map_config]
+res = 0.05
+width = 1000
+height = 1000
+origin = [0.0, 0.0]
 
-### Octree
+[lidar_config]
+dt = 100
 
-在`src/octree`模块中自行实现了基础的不可扩展八叉树，后续增加扩展功能。
+[kalman_filter_config]
+q = 0.01
+r = 0.01
+p = 1       # never read
+k = 0.5     # never read
 
-### ImuIntegrator
+[imu_config]
+init_time = 1
 
-存储惯导数据的模块，包含六轴IMU数据和累积IMU读数
+[octree_config]
+boundary = 2
+max_depth = 5
+voxel_size = 0.08
 
-## 主要方法
+[apf_config]
+k_att = 0.1
+k_rep = 0.1
+d0 = 0.5
+epsilon = 0.3
+step_size = 0.05
+max_steps = 500
 
-### IMU计算
+[l_shape_navigation_config]
+d0 = 0.8
+```
 
-通过`imu_init()`进行零偏校准，后续读取数据时使用卡尔曼滤波。根据合加速度进行零速检测和匀速运动检测。
+不建议调整除`l_shape_navigation_config`以外的值
 
-### APF路径规划
+### 编译
 
-通过建立人工势场引导无人机进行避障。
+#### 编译为可执行文件
+
+进入仓库根目录，运行`cargo build --release`
+
+#### 编译为Python库
+
+* 进入仓库根目录
+* `conda activate MID360`
+* `maturin develop --release`
+
+### Python调用
+
+启动`MID360` conda venv，示例如下：
+
+``` Python
+import world_without_anime
+import time
+
+config_path = r"H:\Project\Drones\src\WorldWithoutAnime\config.toml"    # 配置文件路径，没什么好说的，保险起见用绝对路径
+#world_without_anime.run_mid360_with_bevy(config_path, False)
+
+# 回调函数，Mavlink数据从这里获取
+# data中即为MavlinkArgs，可以用迭代器访问
+def data_received(data):
+    for item in data:
+        # 这里每个item为一个Mavlinkargs，用字段访问就行
+        print(f"Velocity: {item.vx}, {item.vy}, {item.vz}")
+
+world_without_anime.run_mid360_special_edition(config_path, data_received)  
+
+# 防止Python进程退出
+while (True):
+    time.sleep(0.2)
+
+# 该函数单独使用可进行可视化渲染，会主动持有线程，相当于无限循环
+# 传入True为工训特调模式
+world_without_anime.run_mid360_with_bevy(config_path, True)
+```
