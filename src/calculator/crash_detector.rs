@@ -69,7 +69,7 @@ pub fn obstacle_avoidance(
         let weight = 1.0 / (distance.powi(3) + EPSILON);
         sum_x += -coordinate.x * weight;
         sum_y += -coordinate.y * weight;
-         sum_z += -coordinate.z * weight;
+        sum_z += -coordinate.z * weight;
     }
 
     let _minimum_distance = sorted_obstacle_list[0].0;

@@ -147,7 +147,7 @@ fn setup_bevy(
     // Add a camera and look at front
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0., 1.8, 3.).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0., 1.5, 4.).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Add a red sphere to represent the drone

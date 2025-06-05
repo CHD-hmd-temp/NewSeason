@@ -9,7 +9,7 @@ height = 1000
 origin = [0.0, 0.0]
 
 [lidar_config]
-dt = 200
+dt = 100
 
 [kalman_filter_config]
 q = 0.01
@@ -18,7 +18,7 @@ p = 1       # never read
 k = 0.5     # never read
 
 [imu_config]
-init_time = 1
+init_time = 3
 
 [octree_config]
 boundary = 10

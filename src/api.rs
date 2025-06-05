@@ -1,3 +1,5 @@
+use core::time;
+
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -178,6 +180,8 @@ fn get_mavlink_args(
 
 use crossbeam_channel::Receiver;
 use crate::calculator::apf::l_shape_navigation;
+use crate::calculator::crash_detector::crash_warn_for_octree;
+use crate::calculator::crash_detector::obstacle_avoidance;
 use crate::config;
 use crate::data_reader;
 #[pyfunction]
@@ -215,6 +219,7 @@ pub fn get_mavlink_args_EPIAC_special_edition(config_origin: &config::AppConfig)
     use crate::data_reader::udp_reader::ConnectionState;
     use crossbeam_channel::unbounded;
     use std::net::UdpSocket;
+    use std::time::{Instant, Duration};
     use crate::calculator::apf;
     use crate::data_reader::udp_reader;
     use crate::calculator::voxel_grid::voxel_grid_filter;
@@ -237,6 +242,7 @@ pub fn get_mavlink_args_EPIAC_special_edition(config_origin: &config::AppConfig)
         let mut mavlink_vec: Vec<MavlinkArgs> = Vec::new();
         let mut state = NavState::FollowHallway;
         let mut state_switch_flag: u8 = 0;
+        let mut start_time = Instant::now();
         loop {
             let vec_laserdata = udp_reader::read_pointcloud(
                 &lidar_socket,
@@ -263,7 +269,23 @@ pub fn get_mavlink_args_EPIAC_special_edition(config_origin: &config::AppConfig)
             let mut octree = creat_octree_from_vec(octree_config.boundary, octree_config.max_depth, voxeled_points);
             octree.optimize();
             let octree_map = octree.get_laser_points();
-            
+
+            // obstacle avoidance
+            let warn_trigger_distance = apf_config.d0;
+            let tup_obstacle_result = crash_warn_for_octree(&octree, warn_trigger_distance);
+
+            match tup_obstacle_result.0 {
+                true => {
+                    let mavlink_message = obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
+                    let mavlink_vec = Vec::from([mavlink_message]);
+                    let _ = mavlink_tx.send(mavlink_vec);
+                    // TODO: restrict mavlink_message.vx, vy, vz
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                false => {}
+            }
+
+            // L-shape navigation
             let next_state = l_shape_navigation(&octree_map, state.clone(), l_shape_navigation_config.d0);
             if next_state != state && state_switch_flag >= 10{
                 state = next_state;
@@ -287,27 +309,31 @@ pub fn get_mavlink_args_EPIAC_special_edition(config_origin: &config::AppConfig)
                     apf_goal = Point3f::new(0.0, 0.0, 0.0);
                 }
             }
+            
+            // Check if 5 seconds have passed since the last path planning
+            if start_time.elapsed() >= Duration::from_secs(5) {
+                start_time = Instant::now(); // Reset the timer
+                let apf_path = apf::apf_plan_mavlink(
+                    Point3f::new(0.0, 0.0, 0.0),
+                    apf_goal,
+                    &octree_map,
+                    &apf_config
+                );
 
-            let apf_path = apf::apf_plan_mavlink(
-                Point3f::new(0.0, 0.0, 0.0),
-                apf_goal,
-                &octree_map,
-                &apf_config
-            );
-
-            match apf_path {
-                Ok(path) => {
-                    let _ = mavlink_tx.send(path.clone());
-                }
-                Err(ApfError::LocalMinimum(partial_path)) => {
-                    println!("Error: Local minimum reached");
-                    let _ = mavlink_tx.send(partial_path);
-                }
-                Err(ApfError::MaxStepsReached(partial_path)) => {
-                    println!("Error: Max steps reached");
-                    let _ = mavlink_tx.send(partial_path);
-                }
-            };
+                match apf_path {
+                    Ok(path) => {
+                        let _ = mavlink_tx.send(path.clone());
+                    }
+                    Err(ApfError::LocalMinimum(partial_path)) => {
+                        println!("Error: Local minimum reached");
+                        let _ = mavlink_tx.send(partial_path);
+                    }
+                    Err(ApfError::MaxStepsReached(partial_path)) => {
+                        println!("Error: Max steps reached");
+                        let _ = mavlink_tx.send(partial_path);
+                    }
+                };
+            }
         }
     });
 
