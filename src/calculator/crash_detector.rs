@@ -1,4 +1,6 @@
 #![allow(unused)]
+use bevy::text::cosmic_text::ttf_parser::ankr::Point;
+
 use crate::octree::octree;
 use crate::prelude::*;
 use crate::api::MavlinkArgs;
@@ -75,11 +77,16 @@ pub fn obstacle_avoidance(
     let _minimum_distance = sorted_obstacle_list[0].0;
     let speed = MAX_SPEED;
 
+    // Normalize the vector
+    // If the magnitude is too small, we will just rotate around Z axis
+    // and move backward to avoid the closest obstacle
+    // If the magnitude is large enough, we will move in the direction of the vector
     let magnitude = (sum_x.powi(2) + sum_y.powi(2) + sum_z.powi(2)).sqrt();
     if magnitude < EPSILON {
         let (_, coordinate_closest) = sorted_obstacle_list[0];
         let dir_mag = distance(&coordinate_closest, &Point3f::new(0.0, 0.0, 0.0));
         if dir_mag < EPSILON {
+            // rotate around Z axis
             result.type_mask = 0b010111111111;
             result.yaw_rate = 0.5; // TODO: stop after a while
             return result;
@@ -90,9 +97,10 @@ pub fn obstacle_avoidance(
             let vy = speed * -coordinate_closest.y / dir_mag; // Change O-XYZ to O-FRD
             let vz = speed * -coordinate_closest.z / dir_mag;
             let (vx, vy, vz) = mid360_to_frd(vx, vy, vz);
-            result.vx = vx;
-            result.vy = vy;
-            result.vz = vz;
+            let v_normalized = (vx.powi(2) + vy.powi(2) + vz.powi(2)).sqrt();
+            result.vx = vx / v_normalized * speed;
+            result.vy = vy / v_normalized * speed;
+            result.vz = vz / v_normalized * speed;
             return result;
         }
     }

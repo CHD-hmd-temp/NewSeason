@@ -279,8 +279,8 @@ pub fn get_mavlink_args_EPIAC_special_edition(config_origin: &config::AppConfig)
                     let mavlink_message = obstacle_avoidance(&tup_obstacle_result.1, warn_trigger_distance);
                     let mavlink_vec = Vec::from([mavlink_message]);
                     let _ = mavlink_tx.send(mavlink_vec);
-                    // TODO: restrict mavlink_message.vx, vy, vz
-                    std::thread::sleep(Duration::from_secs(1));
+                    // Stop the thread for 2 seconds if an obstacle is detected
+                    std::thread::sleep(Duration::from_secs(2));
                 }
                 false => {}
             }
