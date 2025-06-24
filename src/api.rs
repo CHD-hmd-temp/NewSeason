@@ -368,6 +368,38 @@ fn run_mid360_special_edition(config_path: &str, callback: Py<PyAny>) -> PyResul
     Ok(())
 }
 
+use std::sync::Mutex;
+use std::collections::VecDeque;
+use once_cell::sync::Lazy;
+static MAVLINK_QUEUE: Lazy<Mutex<VecDeque<Vec<MavlinkArgs>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+#[pyfunction]
+fn run_mid360_special_edition_with_queue(config_path: &str) -> PyResult<()> {
+    let config = config::load_config(config_path)
+    .unwrap_or_else(|err| {
+        eprintln!("Error loading `{}`: {}", config_path, err);
+        config::AppConfig::default()
+    });
+    
+    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+        return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
+    }
+    let mavlink_rx = get_mavlink_args_EPIAC_special_edition(&config);
+
+    std::thread::spawn(move || {
+        for received in mavlink_rx {
+            MAVLINK_QUEUE.lock().unwrap().push_back(received);
+        }
+    });
+
+    Ok(())
+}
+
+#[pyfunction]
+fn poll_mavlink_args() -> PyResult<Option<Vec<MavlinkArgs>>> {
+    let mut queue = MAVLINK_QUEUE.lock().unwrap();
+    Ok(queue.pop_front())
+}
+
 #[pyfunction]
 fn run_mid360_with_bevy(config_path: &str, special_edition: bool) -> PyResult<()> {
     use crate::visualization;
@@ -783,5 +815,7 @@ fn world_without_anime(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_mid360, m)?)?;
     m.add_function(wrap_pyfunction!(run_mid360_special_edition, m)?)?;
     m.add_function(wrap_pyfunction!(run_mid360_with_bevy, m)?)?;
+    m.add_function(wrap_pyfunction!(run_mid360_special_edition_with_queue, m)?)?;
+    m.add_function(wrap_pyfunction!(poll_mavlink_args, m)?)?;
     Ok(())
 }
