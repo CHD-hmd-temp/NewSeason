@@ -527,7 +527,7 @@ fn run_lidar(map_tx: crossbeam_channel::Sender<crate::map::occupancy_map::Occupa
 fn create_imu_integrator(config: &config::AppConfig) -> (crate::calculator::imu::ImuIntegrator, crate::calculator::kalman_filter::ImuKalmanFilter) {
     use std::net::UdpSocket;
     use crate::calculator;
-    let imu_bias = calculator::imu::imu_init(config.imu_config.init_time);
+    let imu_bias = calculator::imu::imu_init(config.imu_config.init_time, &config);
     let imu_socket = UdpSocket::bind(&config.hardware_config.imu_socket).expect("Port bind failed");
     let imu_kalman = calculator::kalman_filter::imu_kalman_filter_init(
         imu_socket,
@@ -571,7 +571,7 @@ pub fn run_bevy_via_tunnel(
 
 
     println!("IMU initialization...");
-    let imu_bias = imu::imu_init(config_origin.imu_config.init_time);
+    let imu_bias = imu::imu_init(config_origin.imu_config.init_time, &config_origin);
     let imu_socket = UdpSocket::bind(config_origin.hardware_config.imu_socket.clone()).expect("Port bind failed");
     let mut imu_kalman = kalman_filter::imu_kalman_filter_init(imu_socket, 0.01, 0.01);
     let mut imu_integrator = imu::ImuIntegrator::new(imu_bias);

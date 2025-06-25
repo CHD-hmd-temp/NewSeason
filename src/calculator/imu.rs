@@ -1,11 +1,12 @@
 #![allow(unused)]
-use crate::prelude::*;
+use crate::{config, prelude::*};
 use crate::data_reader::udp_reader::{self, ConnectionState};
 use crate::calculator::kalman_filter::ImuKalmanFilter;
 use nalgebra::UnitQuaternion;
 use std::time::{Duration, Instant};
 use std::net::UdpSocket;
 use bevy::prelude::*;
+use crate::config::AppConfig;
 
 /// FLU coordinate system
 #[derive(Clone, Resource, Event, Copy)]
@@ -127,8 +128,8 @@ impl ImuIntegrator {
     }
 }
 
-pub fn imu_init(init_time: u64) -> ImuBias {
-    let socket_imu = UdpSocket::bind("0.0.0.0:56401").unwrap();
+pub fn imu_init(init_time: u64, config: &AppConfig) -> ImuBias {
+    let socket_imu = UdpSocket::bind(config.hardware_config.imu_socket.clone()).unwrap();
     let time = Instant::now();
     let mut count = 1;
     let mut accel_sum = Vector3f::zeros();
