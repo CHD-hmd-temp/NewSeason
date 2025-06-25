@@ -191,8 +191,8 @@ fn run_mid360(config_path: &str, callback: Py<PyAny>) -> PyResult<()> {
         eprintln!("Error loading `{}`: {}", config_path, err);
         config::AppConfig::default()
     });
-    
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+
+    if !data_reader::sensor_detect::is_imu_sensor_online(&config) || !data_reader::sensor_detect::is_lidar_online(&config) {
         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
     }
     let mavlink_rx = get_mavlink_args(&config);
@@ -348,7 +348,7 @@ fn run_mid360_special_edition(config_path: &str, callback: Py<PyAny>) -> PyResul
         config::AppConfig::default()
     });
     
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+    if !data_reader::sensor_detect::is_imu_sensor_online(&config) || !data_reader::sensor_detect::is_lidar_online(&config) {
         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
     }
     let mavlink_rx = get_mavlink_args_EPIAC_special_edition(&config);
@@ -379,8 +379,8 @@ fn run_mid360_special_edition_with_queue(config_path: &str) -> PyResult<()> {
         eprintln!("Error loading `{}`: {}", config_path, err);
         config::AppConfig::default()
     });
-    
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+
+    if !data_reader::sensor_detect::is_imu_sensor_online(&config) || !data_reader::sensor_detect::is_lidar_online(&config) {
         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
     }
     let mavlink_rx = get_mavlink_args_EPIAC_special_edition(&config);
@@ -408,8 +408,8 @@ fn run_mid360_with_bevy(config_path: &str, special_edition: bool) -> PyResult<()
         eprintln!("Error loading `{}`: {}", config_path, err);
         config::AppConfig::default()
     });
-    
-    if !data_reader::sensor_detect::is_imu_sensor_online() || !data_reader::sensor_detect::is_lidar_online() {
+
+    if !data_reader::sensor_detect::is_imu_sensor_online(&config) || !data_reader::sensor_detect::is_lidar_online(&config) {
         return Err(pyo3::exceptions::PyException::new_err("IMU or LiDAR is not online"));
     }    
 

@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 use std::net::UdpSocket;
 use crate::data_reader::udp_reader;
+use crate::config::AppConfig;
 
-pub fn is_imu_sensor_online() -> bool {
+pub fn is_imu_sensor_online(config: &AppConfig) -> bool {
     // Check if port 56401 is open
-    let socket = UdpSocket::bind("0.0.0.0:56401").expect("Port bind failed");
+    let socket = UdpSocket::bind(config.hardware_config.imu_socket.clone()).expect("Port bind failed");
     socket.set_read_timeout(Some(std::time::Duration::from_secs(1))).expect("Set timeout failed");
 
     let mut buf = [0; 65536];
@@ -29,10 +30,10 @@ pub fn is_imu_sensor_online() -> bool {
     }
 }
 
-pub fn is_lidar_online() -> bool {
+pub fn is_lidar_online(config: &AppConfig) -> bool {
     // Check if port 56301 is open
     // Timeout is set to 1 second
-    let socket = UdpSocket::bind("0.0.0.0:56301").expect("Port bind failed");
+    let socket = UdpSocket::bind(config.hardware_config.lidar_socket.clone()).expect("Port bind failed");
     socket.set_read_timeout(Some(std::time::Duration::from_secs(1))).expect("Set timeout failed");
 
     let mut buf = [0; 65536];
