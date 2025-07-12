@@ -1,4 +1,6 @@
-# WorldWithoutAnime
+# NewSeason
+
+WorldWithoutAnime的ROS1移植版
 
 基于Livox MID360激光雷达开发的无人机自主导航和避障软件。使用Rust开发，并由Bevy引擎进行可视化渲染。
 
@@ -105,3 +107,15 @@ while (True):
 # 传入True为工训特调模式
 world_without_anime.run_mid360_with_bevy(config_path, True)
 ```
+
+### ROS话题订阅与发布
+
+#### 订阅话题
+
+在`/src/msg.rs`中手动包括需要解析的话题类型，话题路径应该位于`ROSRUST_MSG_PATH`环境变量中，详见rosrust
+
+例如，订阅`/Odometry`话题（类型为`nav_msg/Odometry`），需要包含该路径
+
+#### 发布话题
+
+开发中

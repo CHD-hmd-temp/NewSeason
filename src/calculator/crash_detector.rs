@@ -1,5 +1,6 @@
 #![allow(unused)]
 use bevy::text::cosmic_text::ttf_parser::ankr::Point;
+use nalgebra::distance;
 
 use crate::octree::octree;
 use crate::prelude::*;
@@ -21,10 +22,10 @@ pub fn crash_warn_for_octree(
             continue;
         }
         for point in points {
-            if point.0 <= warn_trigger_distance {
+            if point.0 <= warn_trigger_distance && point.0 > 0.2 {
                 result = true;
+                obstacle_list.push((distance as f32, point.1.coordinate));
             }
-            obstacle_list.push((distance as f32, point.1.coordinate));
         }
     }
     return (result, obstacle_list);

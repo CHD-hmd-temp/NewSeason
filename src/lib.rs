@@ -4,5 +4,5 @@ mod calculator;
 mod visualization;
 mod prelude;
 mod api;
-mod map;
+mod msg;
 mod config;

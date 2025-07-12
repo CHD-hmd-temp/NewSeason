@@ -145,3 +145,39 @@ pub fn distance(a: &Point3f, b: &Point3f) -> f32 {
     let diff = a - b;
     diff.norm()
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct LivoxPointCloud2 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub intensity: f32,
+    pub tag: u8,
+    pub line: u8,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DronePosition {
+    pub position: Point3f,
+    pub orientation: Vector3f, // 简化的欧拉角表示 (roll, pitch, yaw)
+    pub timestamp: f64,
+}
+
+impl DronePosition {
+    pub fn new(position: Point3f, orientation: Vector3f, timestamp: f64) -> Self {
+        Self {
+            position,
+            orientation,
+            timestamp,
+        }
+    }
+    
+    pub fn default() -> Self {
+        Self {
+            position: Point3f::new(0.0, 0.0, 0.0),
+            orientation: Vector3f::new(0.0, 0.0, 0.0),
+            timestamp: 0.0,
+        }
+    }
+}

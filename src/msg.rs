@@ -1,0 +1,11 @@
+rosrust::rosmsg_include!(
+    livox_ros_driver2/CustomMsg,
+    geometry_msgs/Vector3,
+    geometry_msgs/Twist,
+    geometry_msgs/PoseStamped,
+    geometry_msgs/Point,
+    geometry_msgs/Quaternion,
+    mavros_msgs/GlobalPositionTarget,
+    mavros_msgs/PositionTarget,
+    nav_msgs/Odometry,
+);
