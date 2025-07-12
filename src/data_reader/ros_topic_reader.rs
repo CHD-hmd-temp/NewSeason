@@ -11,6 +11,7 @@ use crate::calculator::{
     voxel_grid,
     crash_detector,
 };
+use crate::msg::std_msgs::Header;
 
 pub fn subscribe_lidar_point(
     config: config::AppConfig,
@@ -20,7 +21,7 @@ pub fn subscribe_lidar_point(
 
     let (tx, rx) = mpsc::channel::<Vec<LaserPoint>>();
     let (pos_tx, pos_rx) = mpsc::channel::<DronePosition>();
-    let velocity_pub = rosrust::publish::<msg::geometry_msgs::Twist>("/new_season", 100).unwrap();
+    let velocity_pub = rosrust::publish::<msg::geometry_msgs::PoseStamped>("/new_season", 100).unwrap();
 
     // Create subscriber for lidar data
     // The subscriber is stopped when the returned object is destroyed
@@ -56,9 +57,6 @@ pub fn subscribe_lidar_point(
         
         let drone_pos = DronePosition::new(position, orientation, timestamp);
         pos_tx.send(drone_pos).unwrap();
-        
-        rosrust::ros_info!("Received position: ({:.2}, {:.2}, {:.2}), yaw: {:.2}",
-            position.x, position.y, position.z, yaw);
     }).unwrap();
 
     thread::spawn(move || {
@@ -105,20 +103,27 @@ pub fn subscribe_lidar_point(
                                 true => crash_detector::obstacle_avoidance(&tuple_obstacle_result.1, warn_trigger_distance),
                                 false => MavlinkArgs::default(),
                             };
-                            let twist_msg = msg::geometry_msgs::Twist {
-                                linear: msg::geometry_msgs::Vector3 {
-                                    x: mavlink_message.vx as f64,
-                                    y: mavlink_message.vy as f64,
-                                    z: mavlink_message.vz as f64,
-                                    ..Default::default()
+                            let pose_to_publish = msg::geometry_msgs::PoseStamped {
+                                header: Header {
+                                    seq: 0,
+                                    stamp: rosrust::now(),
+                                    frame_id: "world".to_string(),
                                 },
-                                angular: msg::geometry_msgs::Vector3 {
-                                    x: 0.0,
-                                    y: 0.0,
-                                    z: 0.0,
+                                pose: msg::geometry_msgs::Pose {
+                                    position: msg::geometry_msgs::Point {
+                                        x: current_position.position.x as f64 + (mavlink_message.vx as f64) * 0.1,
+                                        y: current_position.position.y as f64 + (mavlink_message.vy as f64) * 0.1,
+                                        z: current_position.position.z as f64 + (mavlink_message.vz as f64) * 0.1,
+                                    },
+                                    orientation: msg::geometry_msgs::Quaternion {
+                                        x: 0.0,
+                                        y: 0.0,
+                                        z: (current_position.orientation.z / 2.0).sin() as f64,
+                                        w: (current_position.orientation.z / 2.0).cos() as f64,
+                                    },
                                 },
                             };
-                            publisher.send(twist_msg).unwrap();
+                            publisher.send(pose_to_publish).unwrap();
 
                             rosrust::ros_info!("Published velocity: ({:.2}, {:.2}, {:.2}) | Drone position: ({:.2}, {:.2}, {:.2})",
                                 mavlink_message.vx,
